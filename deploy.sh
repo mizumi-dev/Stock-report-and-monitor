@@ -68,8 +68,6 @@ cat > /tmp/batch-policy.json << EOF
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist",
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/signal_history"
      ]},
-    {"Effect": "Allow", "Action": ["dynamodb:GetItem"],
-     "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/approved_tokens"},
     {"Effect": "Allow", "Action": ["ses:SendEmail"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
@@ -207,35 +205,6 @@ REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock
   --region $AWS_REGION --query FunctionUrl --output text)
 echo "登録用URL: $REGISTER_URL"
 
-echo "=== 7b. daily-batch にレポート即時送信用の Function URL を発行 ==="
-aws lambda create-function-url-config \
-  --function-name daily-batch \
-  --auth-type NONE \
-  --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
-
-aws lambda remove-permission --function-name daily-batch \
-  --statement-id public-url-access --region $AWS_REGION 2>/dev/null || true
-aws lambda add-permission \
-  --function-name daily-batch \
-  --action lambda:InvokeFunctionUrl \
-  --principal "*" \
-  --function-url-auth-type NONE \
-  --statement-id public-url-access \
-  --region $AWS_REGION
-
-aws lambda remove-permission --function-name daily-batch \
-  --statement-id public-url-invoke-function --region $AWS_REGION 2>/dev/null || true
-aws lambda add-permission \
-  --function-name daily-batch \
-  --action lambda:InvokeFunction \
-  --principal "*" \
-  --statement-id public-url-invoke-function \
-  --region $AWS_REGION
-
-BATCH_URL=$(aws lambda get-function-url-config --function-name daily-batch \
-  --region $AWS_REGION --query FunctionUrl --output text)
-echo "レポート送信用URL: ${BATCH_URL}?token=${REGISTER_TOKEN}"
-
 echo "=== 8. daily-batch の環境変数にREGISTER_URLを反映 ==="
 aws lambda update-function-configuration \
   --function-name daily-batch \
@@ -256,6 +225,5 @@ echo "  1. $SES_SENDER に届く確認メールのリンクをクリック(SES�
 echo "  2. サンドボックスモードの場合、$SES_RECIPIENT も同様に verify-email-identity で検証すること"
 echo "  3. 動作確認: aws lambda invoke --function-name daily-batch --region $AWS_REGION /tmp/out.json && cat /tmp/out.json"
 echo "  4. ブラウザで ${REGISTER_URL}?token=${REGISTER_TOKEN} を開いて登録フォームが表示されることを確認"
-echo "  5. ブラウザで ${BATCH_URL}?token=${REGISTER_TOKEN} を開いてレポート送信ボタンが表示されることを確認"
-echo "  6. 招待トークン(${REGISTER_TOKEN})は必ず控えておくこと。再表示は次で可能:"
+echo "  5. 招待トークン(${REGISTER_TOKEN})は必ず控えておくこと。再表示は次で可能:"
 echo "     aws dynamodb scan --table-name approved_tokens --region $AWS_REGION"
