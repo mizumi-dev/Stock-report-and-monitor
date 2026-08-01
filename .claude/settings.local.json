@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"c:\\\\Users\\\\motok\\\\.claude\\\\projects\\\\c--Users-motok-OneDrive--------Claude-Projects---------\\\\memory\\\\\" 2>/dev/null && echo \"exists\" || echo \"not found\")",
+      "Read(//c/Users/motok/.claude/projects/c--Users-motok-OneDrive--------Claude-Projects---------/memory\" 2>/dev/**)",
+      "Bash(ls /c/Users/motok/.claude/projects/ 2>/dev/null | head -20)",
+      "Read(//c/Users/motok/.claude/projects//**)",
+      "Bash(mkdir -p /c/Users/motok/.claude/projects/C--Users-motok-OneDrive--------Claude-Projects---------/memory *)",
+      "Bash(ls /c/Users/motok/.claude/ 2>/dev/null)",
+      "Read(//c/Users/motok/.claude//**)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\motok\\.claude\\projects\\C--Users-motok-OneDrive--------Claude-Projects---------"
+    ]
+  }
+}
