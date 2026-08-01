@@ -10,6 +10,8 @@ import boto3
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+import ranking
+import signals as signals_module
 from data_sources import get_nasdaq100_tickers, get_stock_data
 from signals import calc_all_signals
 from ranking import rank_stocks
@@ -167,6 +169,50 @@ def _render_report_buttons(token: str) -> str:
       <button style="padding:10px 16px;font-size:16px;width:100%;">📊 監視レポートを送る</button>
     </a></p>
     <p style="color:#888;font-size:12px;">送信には数十秒〜数分かかる場合があります。</p>
+    <p><a href="?token={t}&info=1">この仕組みについて(判定ロジック・データ元)</a></p>
+    """
+
+
+def _render_info_page(token: str) -> str:
+    """判定ロジックの説明ページ。設定値はコードの定数からその場で読むので実装とズレない"""
+    t = html.escape(token)
+    period_label = "20日線/50日線(200日線でフィルタ)" if signals_module.PERIOD_MODE == "MID" else "5日線/20日線"
+    trend_label = "移動平均線のゴールデンクロス/パーフェクトオーダー" if signals_module.MA_OR_MACD == "MA" else "MACD"
+
+    return f"""
+    <h3>このサービスの仕組み</h3>
+
+    <h4>📈 選定レポート(週次)</h4>
+    <p>対象: NASDAQ100構成銘柄(NASDAQ公式APIから取得)</p>
+    <p>足切り条件:</p>
+    <ul>
+      <li>利益成長率が {ranking.MIN_GROWTH * 100:.0f}% 以上</li>
+      <li>PEGレシオが 0 より大きく {ranking.MAX_PEG} 以下</li>
+    </ul>
+    <p>足切りを通過した銘柄をPEG昇順(同値は時価総額が大きい方を優先)でランキングし、
+    上位{TOP_N}件をメールで送信します。</p>
+    <p>PEG・利益成長率・時価総額の値は<strong>Yahoo Finance(yfinanceライブラリ)</strong>から取得しています。
+    PEGは「株価収益率(PER) ÷ 利益成長率」で、低いほど成長性に対して割安と判断される指標です
+    (Yahoo Financeの算出値をそのまま使用、当サービス独自の再計算はしていません)。</p>
+
+    <h4>📊 監視レポート(日次)</h4>
+    <p>対象: あなたが登録した監視リストの銘柄のみ(株価データはYahoo Finance)</p>
+    <p>3種類のシグナルを判定します:</p>
+    <ul>
+      <li><strong>トレンド:</strong> {trend_label}({period_label})</li>
+      <li><strong>モメンタム:</strong> RSI({signals_module.RSI_PERIOD}日)が40以下から上昇に転じたら買い、
+      {signals_module.RSI_OVERBOUGHT}以上で売り(買われすぎ)警告</li>
+      <li><strong>出来高:</strong> 過去{signals_module.VOLUME_LOOKBACK}日平均の{signals_module.VOLUME_MULTIPLIER}倍を超えたら急増</li>
+    </ul>
+    <p>🟢/⚪のランプはこれらのシグナルの点灯有無を表示しているだけで、
+    複数条件の合成スコアなどは行っていません。</p>
+
+    <p style="color:#888;font-size:12px;">
+    ※本サービスは投資助言ではありません。指標の計算はYahoo Financeが提供する値に依存しており、
+    その正確性・遅延について当サービスは保証しません。
+    </p>
+
+    <p><a href="?token={t}">戻る</a></p>
     """
 
 
@@ -176,6 +222,9 @@ def _handle_web_trigger(event: dict):
 
     if not _is_valid_token(token):
         return _page("<p>アクセス権がありません。招待リンクを確認してください。</p>", status=403)
+
+    if params.get("info"):
+        return _page(_render_info_page(token))
 
     report = (params.get("report") or "").strip().lower()
 

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 APPROVED_TOKENS_TABLE = os.environ.get("APPROVED_TOKENS_TABLE", "approved_tokens")
 MAX_WATCHLIST_SIZE = int(os.environ.get("MAX_WATCHLIST_SIZE", "5"))
+REPORT_URL = os.environ.get("REPORT_URL", "")  # daily-batchのFunction URL(レポート送信・仕組み説明ページ)
 
 dynamodb = boto3.resource("dynamodb")
 
@@ -67,6 +68,10 @@ def _render_form(token: str) -> str:
     else:
         list_html = "<p>(監視リストは空です)</p>"
 
+    info_link = ""
+    if REPORT_URL:
+        info_link = f'<p><a href="{REPORT_URL}?token={html.escape(token)}&info=1">この仕組みについて(判定ロジック・データ元)</a></p>'
+
     return f"""
     <h3>銘柄を監視リストに登録</h3>
     <form method="GET">
@@ -76,6 +81,7 @@ def _render_form(token: str) -> str:
     </form>
     <p>現在の監視リスト（上限{MAX_WATCHLIST_SIZE}件）</p>
     {list_html}
+    {info_link}
     """
 
 
