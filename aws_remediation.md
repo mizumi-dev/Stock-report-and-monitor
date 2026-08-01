@@ -148,6 +148,37 @@ aws iam get-user --user-name diag-readonly-temp
    ```
 8. メール受信を確認（選別レポート・監視レポート両方）。選別レポート内の登録リンクに `?token=<TOKEN>` が付いていることを確認
 
+## 10. daily-batchにレポート即時送信ボタンを追加
+
+「選定レポート」「監視レポート」をスケジュールを待たずにボタンクリックで送れるようにした。
+register-stockと同じ招待トークンで認証する。
+
+**IAM権限の追加**（daily-batchのロールに`approved_tokens`参照権限がまだ無いため）:
+
+```powershell
+aws iam put-role-policy --role-name stock-report-batch-role --policy-name batch-policy --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\",\"dynamodb:PutItem\",\"dynamodb:Scan\"],\"Resource\":[\"arn:aws:dynamodb:us-east-1:140943195945:table/watchlist\",\"arn:aws:dynamodb:us-east-1:140943195945:table/signal_history\"]},{\"Effect\":\"Allow\",\"Action\":[\"dynamodb:GetItem\"],\"Resource\":\"arn:aws:dynamodb:us-east-1:140943195945:table/approved_tokens\"},{\"Effect\":\"Allow\",\"Action\":[\"ses:SendEmail\"],\"Resource\":\"*\"},{\"Effect\":\"Allow\",\"Action\":[\"logs:CreateLogGroup\",\"logs:CreateLogStream\",\"logs:PutLogEvents\"],\"Resource\":\"*\"}]}"
+```
+
+（実際のロール名は`lambda-daily-batch-role`ではなく`stock-report-batch-role`。手順4で判明した実名を使用）
+
+**コード再デプロイ**（handler.pyのみ変更、他ファイルは前回と同じ）:
+
+```powershell
+Compress-Archive -Force -Path handler.py,signals.py,data_sources.py,ranking.py,report.py -DestinationPath daily_batch_new.zip
+aws lambda update-function-code --function-name daily-batch --zip-file fileb://daily_batch_new.zip --region us-east-1
+```
+
+**daily-batchにFunction URLを発行**（register-stockと同じ手順。2025年10月仕様なので2つの許可が両方必要）:
+
+```powershell
+aws lambda create-function-url-config --function-name daily-batch --auth-type NONE --region us-east-1
+aws lambda add-permission --function-name daily-batch --action lambda:InvokeFunctionUrl --principal "*" --function-url-auth-type NONE --statement-id public-url-access --region us-east-1
+aws lambda add-permission --function-name daily-batch --action lambda:InvokeFunction --principal "*" --statement-id public-url-invoke-function --region us-east-1
+aws lambda get-function-url-config --function-name daily-batch --region us-east-1 --query FunctionUrl --output text
+```
+
+出てきたURLの末尾に `?token=<招待トークン>` を付けたものが、レポート送信ボタン付きページのURL。
+
 ---
 
 ## 実施済み（記録）
@@ -159,4 +190,6 @@ aws iam get-user --user-name diag-readonly-temp
 - [x] daily-batch handler/report: 招待トークン付きURLの組み立て、上位件数(TOP_N)の環境変数化、
       `force_weekly`によるテスト用強制実行に対応
 - [x] register.zip再生成（修正版handler入り）
-- [ ] AWS側の反映（本ファイルの手順2〜6、要実施）
+- [x] AWS側の反映（本ファイルの手順2〜6）
+- [x] daily-batch/report: レポート即時送信ボタン(選定/監視)をFunction URLで追加
+- [ ] daily-batchのFunction URL発行・IAM権限追加（本ファイルの手順10、要実施）
