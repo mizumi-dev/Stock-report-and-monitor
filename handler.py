@@ -5,6 +5,7 @@ daily-batch Lambda ハンドラ
 import os
 import boto3
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from data_sources import get_nasdaq100_tickers, get_stock_data
 from signals import calc_all_signals
@@ -44,9 +45,20 @@ def get_prev_signals(ticker: str) -> dict | None:
     return resp.get("Item", {}).get("signals")
 
 
+def _to_dynamodb_safe(value):
+    """DynamoDBはPythonのfloatを受け付けないためDecimalに変換する"""
+    if isinstance(value, float):
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _to_dynamodb_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamodb_safe(v) for v in value]
+    return value
+
+
 def save_signals(ticker: str, signals: dict):
     table = dynamodb.Table(SIGNAL_HISTORY_TABLE)
-    table.put_item(Item={"ticker": ticker, "date": _today_str(), "signals": signals})
+    table.put_item(Item={"ticker": ticker, "date": _today_str(), "signals": _to_dynamodb_safe(signals)})
 
 
 def send_email(subject: str, html_body: str):
