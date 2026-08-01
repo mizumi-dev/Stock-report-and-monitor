@@ -16,7 +16,9 @@ SIGNAL_HISTORY_TABLE = os.environ.get("SIGNAL_HISTORY_TABLE", "signal_history")
 SES_SENDER = os.environ["SES_SENDER"]
 SES_RECIPIENT = os.environ["SES_RECIPIENT"]
 REGISTER_URL = os.environ["REGISTER_FUNCTION_URL"]
+REGISTER_TOKEN = os.environ["REGISTER_TOKEN"]  # メール内リンクに付与する招待トークン
 IS_WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_WEEKDAY", "0")  # 0=月曜
+TOP_N = int(os.environ.get("TOP_N", "3"))
 
 dynamodb = boto3.resource("dynamodb")
 ses = boto3.client("ses")
@@ -70,8 +72,8 @@ def run_selection_report():
         stocks.append(d)
         signals_map[t] = calc_all_signals(d["history"])
 
-    ranked = rank_stocks(stocks)
-    html = build_selection_report(ranked, signals_map, REGISTER_URL)
+    ranked = rank_stocks(stocks, top_n=TOP_N)
+    html = build_selection_report(ranked, signals_map, REGISTER_URL, REGISTER_TOKEN)
     send_email("📈 今週の買い時レポート", html)
 
 
@@ -104,8 +106,10 @@ def run_monitoring_report():
 
 
 def handler(event, context):
+    event = event or {}
     weekday = str(datetime.now(timezone.utc).weekday())
-    if weekday == IS_WEEKLY_REPORT_DAY:
+    # event={"force_weekly": true} でスケジュールを待たずに選別レポートをテスト実行できる
+    if event.get("force_weekly") or weekday == IS_WEEKLY_REPORT_DAY:
         run_selection_report()
     run_monitoring_report()
     return {"statusCode": 200, "body": "OK"}

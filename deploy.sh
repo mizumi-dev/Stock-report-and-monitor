@@ -38,6 +38,12 @@ aws dynamodb create-table \
   --key-schema AttributeName=ticker,KeyType=HASH AttributeName=date,KeyType=RANGE \
   --billing-mode PAY_PER_REQUEST --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
+aws dynamodb create-table \
+  --table-name approved_tokens \
+  --attribute-definitions AttributeName=token,AttributeType=S \
+  --key-schema AttributeName=token,KeyType=HASH \
+  --billing-mode PAY_PER_REQUEST --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
+
 echo "=== 2. SESメールアドレス検証(自分でメール内リンクをクリックする必要あり) ==="
 aws ses verify-email-identity --email-address "$SES_SENDER" --region $AWS_REGION
 echo "→ $SES_SENDER 宛に確認メールが届きます。リンクをクリックして検証を完了してください。"
@@ -77,8 +83,10 @@ cat > /tmp/register-policy.json << EOF
 {
   "Version": "2012-10-17",
   "Statement": [
-    {"Effect": "Allow", "Action": ["dynamodb:PutItem"],
+    {"Effect": "Allow", "Action": ["dynamodb:PutItem","dynamodb:DeleteItem","dynamodb:Scan"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist"},
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem"],
+     "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/approved_tokens"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
 }
@@ -111,7 +119,15 @@ aws iam put-role-policy --role-name scheduler-invoke-batch-role \
 echo "IAMロール反映待ち(10秒)..."
 sleep 10
 
-echo "=== 4. Lambda Layer 公開 ==="
+echo "=== 4. 招待トークン発行(承認済み利用者= SES_SENDER 用) ==="
+REGISTER_TOKEN=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+aws dynamodb put-item \
+  --table-name approved_tokens \
+  --item "{\"token\":{\"S\":\"$REGISTER_TOKEN\"},\"email\":{\"S\":\"$SES_SENDER\"}}" \
+  --region $AWS_REGION
+echo "招待トークン(このURLを本人以外に共有しないこと): $REGISTER_TOKEN"
+
+echo "=== 5. Lambda Layer 公開 ==="
 LAYER_ARN=$(aws lambda publish-layer-version \
   --layer-name stock-report-deps \
   --zip-file fileb://$LAYER_ZIP \
@@ -119,7 +135,7 @@ LAYER_ARN=$(aws lambda publish-layer-version \
   --region $AWS_REGION --query LayerVersionArn --output text)
 echo "Layer ARN: $LAYER_ARN"
 
-echo "=== 5. daily-batch Lambda 作成 ==="
+echo "=== 6. daily-batch Lambda 作成 ==="
 rm -f daily_batch.zip
 zip daily_batch.zip $DAILY_BATCH_FILES > /dev/null
 
@@ -131,12 +147,12 @@ aws lambda create-function \
   --zip-file fileb://daily_batch.zip \
   --timeout 300 --memory-size 512 \
   --layers "$LAYER_ARN" \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,REGISTER_TOKEN=$REGISTER_TOKEN,TOP_N=3}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
     --zip-file fileb://daily_batch.zip --region $AWS_REGION
 
-echo "=== 6. register-stock Lambda 作成 + Function URL 発行 ==="
+echo "=== 7. register-stock Lambda 作成 + Function URL 発行 ==="
 rm -f register.zip
 (cd "$REGISTER_DIR" && zip "$OLDPWD/register.zip" handler.py > /dev/null)
 
@@ -147,6 +163,7 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
@@ -188,13 +205,13 @@ REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock
   --region $AWS_REGION --query FunctionUrl --output text)
 echo "登録用URL: $REGISTER_URL"
 
-echo "=== 7. daily-batch の環境変数にREGISTER_URLを反映 ==="
+echo "=== 8. daily-batch の環境変数にREGISTER_URLを反映 ==="
 aws lambda update-function-configuration \
   --function-name daily-batch \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,REGISTER_TOKEN=$REGISTER_TOKEN,TOP_N=3}" \
   --region $AWS_REGION
 
-echo "=== 8. EventBridge Scheduler 設定(毎日 米東部17時=UTC22時 平日) ==="
+echo "=== 9. EventBridge Scheduler 設定(毎日 米東部17時=UTC22時 平日) ==="
 aws scheduler create-schedule \
   --name daily-stock-report \
   --schedule-expression "cron(0 22 ? * MON-FRI *)" \
@@ -207,4 +224,6 @@ echo "✅ 構築完了。残タスク:"
 echo "  1. $SES_SENDER に届く確認メールのリンクをクリック(SES検証)"
 echo "  2. サンドボックスモードの場合、$SES_RECIPIENT も同様に verify-email-identity で検証すること"
 echo "  3. 動作確認: aws lambda invoke --function-name daily-batch --region $AWS_REGION /tmp/out.json && cat /tmp/out.json"
-echo "  4. ブラウザで $REGISTER_URL を開いて登録フォームが表示されることを確認"
+echo "  4. ブラウザで ${REGISTER_URL}?token=${REGISTER_TOKEN} を開いて登録フォームが表示されることを確認"
+echo "  5. 招待トークン(${REGISTER_TOKEN})は必ず控えておくこと。再表示は次で可能:"
+echo "     aws dynamodb scan --table-name approved_tokens --region $AWS_REGION"

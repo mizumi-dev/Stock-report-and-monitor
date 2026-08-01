@@ -9,8 +9,9 @@ def _signal_dot(flag: bool) -> str:
     return "●" if flag else "○"
 
 
-def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str) -> str:
+def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str, register_token: str) -> str:
     """選定（買い時）レポート・週次"""
+    register_form_url = f"{register_base_url}?token={register_token}"
     if not ranked:
         body_rows = "<p>本日、足切り条件を通過した銘柄はありませんでした。</p>"
     else:
@@ -36,7 +37,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
               <p style="margin:4px 0;"><strong>【第{i}位】{s['ticker']} — {s.get('company_name','')}</strong></p>
               <p style="margin:4px 0;">PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%</p>
               <p style="margin:4px 0;">シグナル: {lamps}</p>
-              <p style="margin:4px 0;"><a href="{register_base_url}?ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
+              <p style="margin:4px 0;"><a href="{register_form_url}&ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
             </div>
             """)
         body_rows = f"<p>🔎 サマリー<br>{summary}</p>" + "".join(cards)
@@ -45,7 +46,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <h2>📈 今週の買い時レポート</h2>
       {body_rows}
-      <p><a href="{register_base_url}">検索ボックスから他の銘柄を登録する →</a></p>
+      <p><a href="{register_form_url}">検索ボックスから他の銘柄を登録する →</a></p>
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
     </body></html>
     """
