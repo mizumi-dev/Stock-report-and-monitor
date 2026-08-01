@@ -9,9 +9,11 @@ def _signal_dot(flag: bool) -> str:
     return "●" if flag else "○"
 
 
-def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str, register_token: str) -> str:
+def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
+                           register_token: str, mode_label: str = "") -> str:
     """選定（買い時）レポート・週次"""
     register_form_url = f"{register_base_url}?token={register_token}"
+    mode_note = f'<p style="color:#888;font-size:12px;">判定期間: {mode_label}モード</p>' if mode_label else ""
     if not ranked:
         body_rows = "<p>本日、足切り条件を通過した銘柄はありませんでした。</p>"
     else:
@@ -45,6 +47,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <h2>📈 今週の買い時レポート</h2>
+      {mode_note}
       {body_rows}
       <p><a href="{register_form_url}">検索ボックスから他の銘柄を登録する →</a></p>
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
@@ -52,7 +55,8 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
     """
 
 
-def build_monitoring_report(watchlist_results: list[dict]) -> str:
+def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
+                            skipped: list[str] | None = None) -> str:
     """監視（売買判断）レポート・日次。各要素は {ticker, price, prev_close, signals, prev_signals}"""
     increased = []
     warnings = []
@@ -97,11 +101,22 @@ def build_monitoring_report(watchlist_results: list[dict]) -> str:
         </div>
         """)
 
+    mode_note = f'<p style="color:#888;font-size:12px;">判定期間: {mode_label}モード</p>' if mode_label else ""
+    skipped_note = ""
+    if skipped:
+        skipped_note = (
+            f'<p style="color:#888;font-size:12px;">'
+            f'次の銘柄は判定に必要な期間の株価データが不足しているため除外しました'
+            f'（上場から日が浅い可能性があります）: {", ".join(skipped)}</p>'
+        )
+
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <h2>📊 本日の監視レポート</h2>
+      {mode_note}
       <p>🔎 サマリー<br>{summary}</p>
       {''.join(blocks)}
+      {skipped_note}
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
     </body></html>
     """

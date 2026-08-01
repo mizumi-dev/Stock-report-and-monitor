@@ -33,15 +33,19 @@ def get_nasdaq100_tickers(fallback: list[str] | None = None) -> list[str]:
         raise
 
 
-def get_stock_data(ticker: str, period: str = "1y") -> dict:
+def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
     """
     1銘柄分の価格ヒストリー・PEG・成長率・時価総額を取得する。
     取得失敗時は None を含む辞書を返す(呼び出し側でスキップ判定)。
+
+    min_rows は期間モードごとに変える必要がある。例えば200日移動平均を使うモードで
+    200行未満のデータを通すと、移動平均が全てNaNになり比較が常にFalseとなって
+    「シグナルが出ない」のではなく「判定が事実上無効化される」状態になるため。
     """
     try:
         tk = yf.Ticker(ticker)
         hist = tk.history(period=period)
-        if hist.empty or len(hist) < 60:
+        if hist.empty or len(hist) < min_rows:
             return {"ticker": ticker, "history": None, "error": "insufficient_history"}
 
         info = tk.info

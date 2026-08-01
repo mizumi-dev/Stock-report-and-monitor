@@ -21,7 +21,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
 # リポジトリのレイアウト（このスクリプトからの相対パス）
-DAILY_BATCH_FILES="handler.py signals.py data_sources.py ranking.py report.py"
+DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py"
 REGISTER_DIR="mnt/user-data/outputs/aws_deploy/lambda_register"
 LAYER_ZIP="layer.zip"
 
@@ -36,6 +36,12 @@ aws dynamodb create-table \
   --table-name signal_history \
   --attribute-definitions AttributeName=ticker,AttributeType=S AttributeName=date,AttributeType=S \
   --key-schema AttributeName=ticker,KeyType=HASH AttributeName=date,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
+
+aws dynamodb create-table \
+  --table-name app_settings \
+  --attribute-definitions AttributeName=key,AttributeType=S \
+  --key-schema AttributeName=key,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
 aws dynamodb create-table \
@@ -68,6 +74,8 @@ cat > /tmp/batch-policy.json << EOF
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist",
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/signal_history"
      ]},
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem"],
+     "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
     {"Effect": "Allow", "Action": ["ses:SendEmail"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
@@ -87,6 +95,10 @@ cat > /tmp/register-policy.json << EOF
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist"},
     {"Effect": "Allow", "Action": ["dynamodb:GetItem"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/approved_tokens"},
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem"],
+     "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
+    {"Effect": "Allow", "Action": ["lambda:InvokeFunction"],
+     "Resource": "arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
 }
@@ -155,6 +167,7 @@ aws lambda create-function \
 echo "=== 7. register-stock Lambda 作成 + Function URL 発行 ==="
 rm -f register.zip
 (cd "$REGISTER_DIR" && zip "$OLDPWD/register.zip" handler.py > /dev/null)
+zip -j register.zip config.py > /dev/null
 
 aws lambda create-function \
   --function-name register-stock \
@@ -163,7 +176,7 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
