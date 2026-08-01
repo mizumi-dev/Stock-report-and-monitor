@@ -170,50 +170,60 @@ def calc_momentum_signal(df: pd.DataFrame) -> dict:
 
 ---
 
-## 未解決の問題: Function URL「Forbidden」
+## 解決済み: Function URL「Forbidden」(2026-08-01 解決)
 
 ### 症状
 
 - `https://limtvgcrufuum3of3htggiovwa0vxxaj.lambda-url.us-east-1.on.aws/` にアクセスすると `{"Message":"Forbidden"}` が返る
 - `aws lambda invoke` による直接実行は正常動作（200 OK）
+- CloudWatch Logsを確認すると、URL経由のリクエストはLambdaに一切到達していなかった（エッジの認可層で拒否）
 
-### 確認済み設定（すべて正しい）
+### 真の原因
 
-- Function URL AuthType: `NONE`
-- リソースポリシー: `lambda:InvokeFunctionUrl` を Principal `*` に許可
-- Lambda状態: Active
-- URL再作成済み（旧URLから新URLに変更）
+**2025年10月のAWS仕様変更**: それ以降に作成されたFunction URLは、リソースポリシーに
+`lambda:InvokeFunctionUrl` **と** `lambda:InvokeFunction` の**両方**の許可が必要になった。
 
-### 原因（推定）
+- 旧来の手順（`deploy.sh`）は `lambda:InvokeFunctionUrl` しか付与していなかった
+- コンソールからURL作成した場合はAWSが両方を自動付与するため、CLI作成時のみ発生する
+- URL・AuthType・既存ポリシー・Organizations SCPはすべて正常だった
 
-**AWSアカウントレベルの「Lambda Block Public Access」が有効**
+※ 当初推定していた「Lambda Block Public Access」は誤り。そのようなAPI/機能は
+Lambdaには存在しない（`get-public-access-block-config` はS3等の機能との混同）。
 
-この設定はアカウント全体でFunction URLのパブリックアクセスをブロックする。CLIの `get-public-access-block-config` コマンドが認識されなかった（CLIバージョンが古い可能性）。
+### 実施した修正
 
-### 修正手順
+```bash
+aws lambda add-permission \
+  --function-name register-stock \
+  --action lambda:InvokeFunction \
+  --principal "*" \
+  --statement-id public-url-invoke-function \
+  --region us-east-1
+```
 
-1. AWSコンソール → Lambda → 左メニュー「設定」→「アクセス許可」
-2. 「ブロックパブリックアクセス」を確認
-3. 有効になっていればオフにする
-4. または AWS CLI を最新版に更新して以下を実行:
-   ```bash
-   aws lambda delete-public-access-block-config \
-     --resource-arn arn:aws:lambda:us-east-1:<ACCOUNT_ID>:function:register-stock
-   ```
+実行後、ブラウザからのアクセスが正常になったことを確認済み。
+`deploy.sh` も両方の許可を付与するよう修正済み。
+
+### 注意（セキュリティ）
+
+CLIの `add-permission` では `lambda:InvokedViaFunctionUrl` 条件を付けられないため、
+上記の許可は「Function URL経由」に限定されていない。より厳密にするには
+コンソールからURLを削除→再作成してAWS自動生成ポリシーに置き換える
+（URLが変わるので `REGISTER_FUNCTION_URL` の更新が必要）。
+詳細は `aws_remediation.md` を参照。
 
 ---
 
 ## 残タスク（優先順）
 
-1. **Function URL の Forbidden 解消**（上記手順）
-2. **daily-batch の環境変数更新** — `REGISTER_FUNCTION_URL` を新URL に変更:
-   ```bash
-   aws lambda update-function-configuration \
-     --function-name daily-batch \
-     --environment "Variables={SES_SENDER=<sender>,SES_RECIPIENT=<recipient>,REGISTER_FUNCTION_URL=https://limtvgcrufuum3of3htggiovwa0vxxaj.lambda-url.us-east-1.on.aws/}"
-   ```
+1. ~~Function URL の Forbidden 解消~~ → **解決済み（上記）**
+2. **daily-batch の環境変数更新** — `REGISTER_FUNCTION_URL` が削除済みの旧URL
+   (`4if5x72qkq2eb4iq7qhgzgz7le0nizby...`) を指したままなのを現URLに変更
+   （手順は `aws_remediation.md` 参照。メール内の登録リンクが壊れている状態）
 3. **daily-batch の再デプロイ** — signals.py の修正を含めた新しいZIPをアップロード
-4. **E2Eテスト** — Function URLから銘柄登録 → daily-batch実行 → メール受信確認
+4. **セキュリティ改善の適用** — `aws_remediation.md` の手順（予約同時実行数、
+   ポリシーの厳密化、調査用IAMユーザーの削除）
+5. **E2Eテスト** — Function URLから銘柄登録 → daily-batch実行 → メール受信確認
 
 ---
 

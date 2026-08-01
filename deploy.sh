@@ -3,8 +3,15 @@
 # 株式レポートサービス AWS一括構築スクリプト
 # 前提: aws configure 済み（AWS CLIに認証情報が設定済み）
 # 使い方: 下記の変数を書き換えてから bash deploy.sh を実行
+#
+# 注意:
+# - 2025年10月以降に作成するFunction URLは、リソースポリシーに
+#   lambda:InvokeFunctionUrl と lambda:InvokeFunction の両方が必要
+#   （片方だけだと403 Forbiddenになる。本スクリプトは両方を付与する）
+# - Windows (Git Bash) では zip コマンドが無い場合がある。その場合は
+#   PowerShell の Compress-Archive で同名のzipを作ってから実行する
 # ===========================================================
-set -e
+set -euo pipefail
 
 # ---- 事前に書き換えてください ----
 export AWS_REGION="us-east-1"
@@ -12,6 +19,11 @@ export SES_SENDER="mohatose4929@gmail.com"      # SESで検証済みにするメ
 export SES_RECIPIENT="mohatose4929@gmail.com"   # レポート送付先(サンドボックスなら要検証)
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
+
+# リポジトリのレイアウト（このスクリプトからの相対パス）
+DAILY_BATCH_FILES="handler.py signals.py data_sources.py ranking.py report.py"
+REGISTER_DIR="mnt/user-data/outputs/aws_deploy/lambda_register"
+LAYER_ZIP="layer.zip"
 
 echo "=== 1. DynamoDBテーブル作成 ==="
 aws dynamodb create-table \
@@ -31,15 +43,15 @@ aws ses verify-email-identity --email-address "$SES_SENDER" --region $AWS_REGION
 echo "→ $SES_SENDER 宛に確認メールが届きます。リンクをクリックして検証を完了してください。"
 
 echo "=== 3. IAMロール作成 ==="
-cat > /tmp/trust-policy.json << 'EOF'
+cat > /tmp/lambda-trust-policy.json << 'EOF'
 {
   "Version": "2012-10-17",
   "Statement": [{"Effect": "Allow", "Principal": {"Service": "lambda.amazonaws.com"}, "Action": "sts:AssumeRole"}]
 }
 EOF
 
-aws iam create-role --role-name stock-report-batch-role \
-  --assume-role-policy-document file:///tmp/trust-policy.json || echo "(既に存在する場合はスキップ)"
+aws iam create-role --role-name lambda-daily-batch-role \
+  --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/batch-policy.json << EOF
 {
@@ -55,11 +67,11 @@ cat > /tmp/batch-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name stock-report-batch-role \
+aws iam put-role-policy --role-name lambda-daily-batch-role \
   --policy-name batch-policy --policy-document file:///tmp/batch-policy.json
 
-aws iam create-role --role-name stock-report-register-role \
-  --assume-role-policy-document file:///tmp/trust-policy.json || echo "(既に存在する場合はスキップ)"
+aws iam create-role --role-name lambda-register-stock-role \
+  --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/register-policy.json << EOF
 {
@@ -71,58 +83,106 @@ cat > /tmp/register-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name stock-report-register-role \
+aws iam put-role-policy --role-name lambda-register-stock-role \
   --policy-name register-policy --policy-document file:///tmp/register-policy.json
 
-echo "IAMロード反映待ち(10秒)..."
+# EventBridge Scheduler がdaily-batchを起動するためのロール(信頼先はscheduler)
+cat > /tmp/scheduler-trust-policy.json << 'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{"Effect": "Allow", "Principal": {"Service": "scheduler.amazonaws.com"}, "Action": "sts:AssumeRole"}]
+}
+EOF
+aws iam create-role --role-name scheduler-invoke-batch-role \
+  --assume-role-policy-document file:///tmp/scheduler-trust-policy.json || echo "(既に存在する場合はスキップ)"
+
+cat > /tmp/scheduler-policy.json << EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Effect": "Allow", "Action": "lambda:InvokeFunction",
+     "Resource": "arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch"}
+  ]
+}
+EOF
+aws iam put-role-policy --role-name scheduler-invoke-batch-role \
+  --policy-name invoke-batch-policy --policy-document file:///tmp/scheduler-policy.json
+
+echo "IAMロール反映待ち(10秒)..."
 sleep 10
 
 echo "=== 4. Lambda Layer 公開 ==="
 LAYER_ARN=$(aws lambda publish-layer-version \
   --layer-name stock-report-deps \
-  --zip-file fileb://layer/layer.zip \
+  --zip-file fileb://$LAYER_ZIP \
   --compatible-runtimes python3.12 \
   --region $AWS_REGION --query LayerVersionArn --output text)
 echo "Layer ARN: $LAYER_ARN"
 
 echo "=== 5. daily-batch Lambda 作成 ==="
-cd lambda_daily_batch && zip -r ../daily_batch.zip . -x "*.pyc" > /dev/null && cd ..
+rm -f daily_batch.zip
+zip daily_batch.zip $DAILY_BATCH_FILES > /dev/null
 
 aws lambda create-function \
   --function-name daily-batch \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-batch-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-daily-batch-role" \
   --handler handler.handler \
   --zip-file fileb://daily_batch.zip \
   --timeout 300 --memory-size 512 \
   --layers "$LAYER_ARN" \
   --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
-  --region $AWS_REGION || echo "(既に存在する場合は update-function-code を使ってください)"
+  --region $AWS_REGION || \
+  aws lambda update-function-code --function-name daily-batch \
+    --zip-file fileb://daily_batch.zip --region $AWS_REGION
 
 echo "=== 6. register-stock Lambda 作成 + Function URL 発行 ==="
-cd lambda_register && zip -r ../register.zip . -x "*.pyc" > /dev/null && cd ..
+rm -f register.zip
+(cd "$REGISTER_DIR" && zip "$OLDPWD/register.zip" handler.py > /dev/null)
 
 aws lambda create-function \
   --function-name register-stock \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-register-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-register-stock-role" \
   --handler handler.handler \
   --zip-file fileb://register.zip \
-  --timeout 10 --memory-size 128 \
-  --region $AWS_REGION || echo "(既に存在する場合は update-function-code を使ってください)"
+  --timeout 30 --memory-size 128 \
+  --region $AWS_REGION || \
+  aws lambda update-function-code --function-name register-stock \
+    --zip-file fileb://register.zip --region $AWS_REGION
+
+# 公開URLの濫用でアカウントの同時実行枠(上限10)を食い潰さないよう上限を設ける
+aws lambda put-function-concurrency \
+  --function-name register-stock \
+  --reserved-concurrent-executions 2 \
+  --region $AWS_REGION
 
 aws lambda create-function-url-config \
   --function-name register-stock \
   --auth-type NONE \
   --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
+# 2025年10月以降のFunction URLは以下の2つの許可が両方必要。
+# 既存の文が残っていると add-permission は上書きせず失敗するため、
+# 先に削除してから追加する(冪等)。
+aws lambda remove-permission --function-name register-stock \
+  --statement-id public-url-access --region $AWS_REGION 2>/dev/null || true
 aws lambda add-permission \
   --function-name register-stock \
   --action lambda:InvokeFunctionUrl \
   --principal "*" \
   --function-url-auth-type NONE \
   --statement-id public-url-access \
-  --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
+  --region $AWS_REGION
+
+aws lambda remove-permission --function-name register-stock \
+  --statement-id public-url-invoke-function --region $AWS_REGION 2>/dev/null || true
+aws lambda add-permission \
+  --function-name register-stock \
+  --action lambda:InvokeFunction \
+  --principal "*" \
+  --statement-id public-url-invoke-function \
+  --region $AWS_REGION
 
 REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock \
   --region $AWS_REGION --query FunctionUrl --output text)
@@ -139,7 +199,7 @@ aws scheduler create-schedule \
   --name daily-stock-report \
   --schedule-expression "cron(0 22 ? * MON-FRI *)" \
   --flexible-time-window '{"Mode": "OFF"}' \
-  --target "{\"Arn\":\"arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch\",\"RoleArn\":\"arn:aws:iam::$ACCOUNT_ID:role/stock-report-batch-role\"}" \
+  --target "{\"Arn\":\"arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch\",\"RoleArn\":\"arn:aws:iam::$ACCOUNT_ID:role/scheduler-invoke-batch-role\"}" \
   --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
 echo ""
@@ -147,3 +207,4 @@ echo "✅ 構築完了。残タスク:"
 echo "  1. $SES_SENDER に届く確認メールのリンクをクリック(SES検証)"
 echo "  2. サンドボックスモードの場合、$SES_RECIPIENT も同様に verify-email-identity で検証すること"
 echo "  3. 動作確認: aws lambda invoke --function-name daily-batch --region $AWS_REGION /tmp/out.json && cat /tmp/out.json"
+echo "  4. ブラウザで $REGISTER_URL を開いて登録フォームが表示されることを確認"

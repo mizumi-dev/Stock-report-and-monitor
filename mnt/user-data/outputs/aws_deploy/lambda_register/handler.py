@@ -5,11 +5,15 @@ Function URL(認証なし)で直接呼ばれる想定。
 例: https://xxxx.lambda-url.us-east-1.on.aws/?ticker=NVDA
 """
 import os
+import re
 import boto3
 from datetime import datetime, timezone
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 dynamodb = boto3.resource("dynamodb")
+
+# ASCII英大文字・数字のみ1〜6文字。isalnum()は全角文字等も通すため正規表現で制限する
+TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")
 
 SEARCH_FORM_HTML = """
 <html><body style="font-family:sans-serif;max-width:400px;margin:40px auto;">
@@ -37,7 +41,7 @@ def handler(event, context):
     if not ticker:
         return _response(SEARCH_FORM_HTML)
 
-    if not ticker.isalnum() or len(ticker) > 6:
+    if not TICKER_RE.match(ticker):
         return _response("<p>無効なティッカーです。</p>", status=400)
 
     table = dynamodb.Table(WATCHLIST_TABLE)
