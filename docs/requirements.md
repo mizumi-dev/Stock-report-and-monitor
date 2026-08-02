@@ -2,7 +2,8 @@
 
 SDLC「Requirements」フェーズの成果物。テストの合否基準（テストベース）として使う。
 実装が先行しているため遡って記述しているが、以後の変更はこのファイルを先に更新してから
-着手する（`sdlc-flow-management`スキル参照）。
+着手する（`sdlc-flow-management`スキル参照）。構成・データモデル・IAM権限は
+`docs/architecture.md`を参照。
 
 最終更新: 2026-08-02（対象: `feature/mode-report-frequency`時点の実装）
 

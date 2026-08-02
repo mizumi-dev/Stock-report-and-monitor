@@ -74,7 +74,7 @@ cat > /tmp/batch-policy.json << EOF
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist",
        "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/signal_history"
      ]},
-    {"Effect": "Allow", "Action": ["dynamodb:GetItem"],
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
     {"Effect": "Allow", "Action": ["ses:SendEmail"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}

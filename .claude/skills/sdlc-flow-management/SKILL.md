@@ -20,7 +20,7 @@ fully reverted after shipping without a clear spec).
 |---|---|---|
 | Planning / backlog | `TODO.md` (priority-ordered) | Item picked, scope agreed with user |
 | Requirements | `docs/requirements.md` (what must be true to call it done) | User confirms the requirement text |
-| Design | `docs/signal-logic-reference.md` and per-feature design notes; for AWS changes, the plan surfaced via `ExitPlanMode` | User says OK to the concrete plan (file diffs named) before code changes |
+| Design | `docs/architecture.md` (Lambda functions, DynamoDB schema, IAM permission matrix — keep this in sync with `deploy.sh`, which is the actual source of truth), `docs/signal-logic-reference.md` and per-feature design notes; for AWS changes, the plan surfaced via `ExitPlanMode` | User says OK to the concrete plan (file diffs named) before code changes |
 | Implementation | git commits on a feature branch | Passes Step "Testing" below before merge/deploy is treated as done |
 | Testing | `docs/test-plan.md`, `docs/test-cases.md`, `docs/test-results/` (see `jstqb-test-process` skill) | Test summary shows no unresolved high-priority defects |
 | Deployment | `agent-led-aws-deploy` skill workflow, `README.md` deploy steps | Live AWS invoke confirms behavior, not just local tests |
