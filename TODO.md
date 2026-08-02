@@ -138,10 +138,21 @@ register-stockの画面文言・エラーメッセージはコード内(`_render
 既に果たしている）、文言一覧はいずれ`docs/requirements.md`への軽い追記で対応する
 価値がある。優先度は低い。
 
-### 5. 監視・ログの可視化がない
+### 5. 監視・ログの可視化がない — 対応済み（2026-08-02）
 
-CloudWatch Logs に生ログはあるが、ダッシュボードもアラームもない。
-「ちゃんと動いているか」を確認する手段が手動 invoke しかない。
+`expert-panel-review`での検討結果、ダッシュボードまでは作らずCloudWatch Alarm(1個)
++SNS+メール通知のみをコスト($0.10〜0.20/月程度)を確認した上で実装。TODO#1のSES直接
+通知が機能しない場合（Lambda自体が起動できない等）への二重の安全網として位置づけ。
+
+- CloudWatch Alarm `daily-batch-errors`(`AWS/Lambda`の`Errors`メトリクス>=1で発火)
+- SNSトピック`daily-batch-alarm-topic`経由でメール通知（購読確認済み）
+- `_test_trigger_failure`で実際に例外を発生させ、Alarmが`INSUFFICIENT_DATA`→`ALARM`
+  に遷移し、メール通知が実際に届くことを実地確認済み
+- `deploy.sh`にも追加済み（新規環境でも同じ構成が再現される）
+- 詳細は`docs/architecture.md`の「3a. 監視・通知リソース」を参照
+
+ダッシュボードは今回作らなかった（TODO.md備考: 追加で$3/月かかるため、必要になったら
+別途検討）。
 
 ### 6. 招待トークンの管理が手作業
 

@@ -12,13 +12,13 @@
 EventBridge Scheduler (平日 UTC22時=JST朝7時)
         │
         ▼
-  daily-batch Lambda ──────┐
+  daily-batch Lambda ──────┬─ SES (メール送信、正常系レポート・TODO#1のエラー通知)
         │                  │
-        ├─ DynamoDB        ├─ SES (メール送信)
-        │  watchlist       │
-        │  signal_history  │
-        │  app_settings(読)│
-        │                  │
+        ├─ DynamoDB        └─ CloudWatch Alarm(Errors>=1) → SNS → メール
+        │  watchlist          (TODO#5。SESでの直接通知が機能しないケースの二重の安全網)
+        │  signal_history
+        │  app_settings(読)
+        │
         └─ 外部API: Nasdaq(銘柄一覧) / yfinance(株価)
 
 register-stock Lambda (Function URL, 認証なしURL+招待トークン)
@@ -58,6 +58,19 @@ register-stock Lambda (Function URL, 認証なしURL+招待トークン)
 | `app_settings` | `key`(HASH) | `period_mode`（期間モード）、`nasdaq100_tickers_cache`（銘柄キャッシュ） |
 | `approved_tokens` | `token`(HASH) | 招待トークン（`email`属性付き） |
 
+## 3a. 監視・通知リソース（TODO#5）
+
+| リソース | 内容 |
+|---|---|
+| CloudWatch Alarm `daily-batch-errors` | `AWS/Lambda`名前空間の`Errors`メトリクス(FunctionName=daily-batch)がSum>=1(5分間隔)でALARM |
+| SNSトピック `daily-batch-alarm-topic` | Alarmのアクション先。`SES_RECIPIENT`のメールアドレスをemailプロトコルで購読（購読確認メールのリンククリックが必要） |
+
+TODO#1で実装したSES直接通知（`_notify_failure`）と役割が重なるように見えるが、
+**Lambda自体が起動できない**（コード全体が壊れて`handler()`にすら到達しない等）場合は
+SES直接通知も実行されないため、CloudWatch Alarmは独立した経路からの二重の安全網として
+機能する。実地確認: `_test_trigger_failure`イベントで意図的に例外を発生させ、
+CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメールが届くことを確認済み。
+
 ## 4. IAM権限マトリクス
 
 `deploy.sh`の`put-role-policy`定義に基づく（実際のロールをこのセッションの権限では
@@ -74,6 +87,8 @@ register-stock Lambda (Function URL, 認証なしURL+招待トークン)
 | | `app_settings` | GetItem, PutItem |
 | | `daily-batch`関数 | InvokeFunction |
 | `scheduler-invoke-batch-role` | `daily-batch`関数 | InvokeFunction |
+| `claude-deploy`(デプロイ用IAMユーザー、Lambdaロールではない) | SNSトピック`daily-batch-alarm-topic` | CreateTopic, Subscribe, SetTopicAttributes, GetTopicAttributes, ListSubscriptionsByTopic |
+| | CloudWatch Alarm`daily-batch-errors` | PutMetricAlarm, DescribeAlarms, DeleteAlarms |
 
 ※1: TODO#2（NASDAQ100銘柄キャッシュ）の実装時、`daily-batch`ロールに`app_settings`への
 `PutItem`権限が不足していることが本番の403エラーで判明し、`aws iam put-role-policy`で

@@ -18,7 +18,7 @@ AWS CLIコマンド自体は（AWSアカウントへの実行権限がないた�
 
 ## 前提
 - AWS CLIがインストール・設定済み（`aws configure`）
-- IAMユーザーにLambda/DynamoDB/SES/IAM/EventBridge Schedulerへの権限があること
+- IAMユーザーにLambda/DynamoDB/SES/IAM/EventBridge Scheduler/SNS/CloudWatchへの権限があること
 
 ## 手順
 

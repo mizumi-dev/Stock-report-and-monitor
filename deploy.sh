@@ -232,6 +232,23 @@ aws scheduler create-schedule \
   --target "{\"Arn\":\"arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch\",\"RoleArn\":\"arn:aws:iam::$ACCOUNT_ID:role/scheduler-invoke-batch-role\"}" \
   --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
+echo "=== 10. CloudWatch Alarm + SNS通知(daily-batchのエラー検知、TODO#5) ==="
+# TODO#1のSES直接通知が動かないケース(Lambda自体が起動できない等)への二重の安全網
+ALARM_TOPIC_ARN=$(aws sns create-topic --name daily-batch-alarm-topic --region $AWS_REGION --query TopicArn --output text)
+aws sns subscribe --topic-arn $ALARM_TOPIC_ARN --protocol email \
+  --notification-endpoint "$SES_RECIPIENT" --region $AWS_REGION > /dev/null
+echo "→ $SES_RECIPIENT 宛にSNS購読確認メールが届きます。リンクをクリックしないとアラーム通知が届きません。"
+
+aws cloudwatch put-metric-alarm \
+  --alarm-name daily-batch-errors \
+  --alarm-description "daily-batch Lambdaがエラー終了した場合に通知(SES通知経路自体が動かないケースの二重の安全網)" \
+  --namespace AWS/Lambda --metric-name Errors \
+  --dimensions Name=FunctionName,Value=daily-batch \
+  --statistic Sum --period 300 --evaluation-periods 1 --threshold 1 \
+  --comparison-operator GreaterThanOrEqualToThreshold \
+  --alarm-actions $ALARM_TOPIC_ARN --treat-missing-data notBreaching \
+  --region $AWS_REGION
+
 echo ""
 echo "✅ 構築完了。残タスク:"
 echo "  1. $SES_SENDER に届く確認メールのリンクをクリック(SES検証)"
