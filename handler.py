@@ -2,7 +2,9 @@
 daily-batch Lambda ハンドラ
 毎日1回、EventBridge Schedulerから起動される想定
 """
+import html
 import os
+import traceback
 import boto3
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -144,9 +146,7 @@ def run_monitoring_report():
     send_email("📊 本日の監視レポート", body)
 
 
-def handler(event, context):
-    event = event or {}
-
+def _dispatch(event: dict) -> dict:
     # 画面の「監視レポートを送る」ボタンから来た場合は監視のみ実行する
     if event.get("monitoring_only"):
         run_monitoring_report()
@@ -174,3 +174,28 @@ def handler(event, context):
         run_selection_report()
     run_monitoring_report()
     return {"statusCode": 200, "body": "OK"}
+
+
+def _notify_failure(event: dict, exc: Exception):
+    """失敗をメールで知らせる。通知自体が失敗しても呼び出し元の例外送出は止めない
+    (元の例外を握りつぶすと、CloudWatchのErrorsメトリクスに記録されず
+    無人実行が黙って失敗し続けるという、対応しようとしている問題そのものを再発させるため)。"""
+    try:
+        body = (
+            f"<p>daily-batchの実行中にエラーが発生しました。</p>"
+            f"<p>event: {html.escape(str(event))}</p>"
+            f"<pre>{html.escape(traceback.format_exc())}</pre>"
+        )
+        send_email("🚨 daily-batchが失敗しました", body)
+    except Exception as notify_exc:
+        print(f"[ERROR] 失敗通知メールの送信にも失敗しました: {notify_exc}")
+
+
+def handler(event, context):
+    event = event or {}
+    try:
+        return _dispatch(event)
+    except Exception as exc:
+        print(f"[ERROR] handler failed: {exc}")
+        _notify_failure(event, exc)
+        raise
