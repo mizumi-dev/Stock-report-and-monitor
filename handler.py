@@ -11,6 +11,8 @@ from decimal import Decimal
 
 from config import (
     DEFAULT_PERIOD_MODE,
+    MIN_FETCH_SUCCESS_RATIO,
+    NASDAQ100_CACHE_KEY,
     PERIOD_MODE_KEY,
     SETTINGS_TABLE_DEFAULT,
     get_preset,
@@ -53,6 +55,31 @@ def get_period_mode() -> str:
     except Exception as e:
         print(f"[WARN] 期間モードの取得に失敗、既定値({DEFAULT_PERIOD_MODE})を使用: {e}")
         return DEFAULT_PERIOD_MODE
+
+
+def get_cached_tickers() -> list[str] | None:
+    """前回成功時に保存したNASDAQ100構成銘柄リスト。Nasdaq API障害時のフォールバック用。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
+        tickers = resp.get("Item", {}).get("value")
+        return list(tickers) if tickers else None
+    except Exception as e:
+        print(f"[WARN] 銘柄キャッシュの取得に失敗: {e}")
+        return None
+
+
+def save_cached_tickers(tickers: list[str]):
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        table.put_item(Item={
+            "key": NASDAQ100_CACHE_KEY,
+            "value": tickers,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        # キャッシュ更新の失敗でレポート送信自体を止める必要はない
+        print(f"[WARN] 銘柄キャッシュの保存に失敗: {e}")
 
 
 def get_watchlist() -> list[str]:
@@ -98,15 +125,27 @@ def run_selection_report():
     """週次: NASDAQ100全銘柄をスキャンしてランキング上位N件のレポートを送る"""
     mode = get_period_mode()
     preset = get_preset(mode)
-    tickers = get_nasdaq100_tickers(fallback=None)
-    stocks, signals_map = [], {}
 
+    cached = get_cached_tickers()
+    tickers = get_nasdaq100_tickers(fallback=cached)
+    save_cached_tickers(tickers)
+
+    stocks, signals_map = [], {}
     for t in tickers:
         d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
         if d.get("history") is None:
             continue
         stocks.append(d)
         signals_map[t] = calc_all_signals(d["history"], mode)
+
+    # 個別銘柄のたまたまの失敗ではなく外部API自体が落ちている可能性が高い場合は、
+    # 中身がほぼ空のレポートを送らずエラー通知に切り替える(handler()のtry/exceptに乗せる)
+    success_ratio = len(stocks) / len(tickers) if tickers else 0
+    if success_ratio < MIN_FETCH_SUCCESS_RATIO:
+        raise RuntimeError(
+            f"銘柄データの取得成功率が低すぎます({len(stocks)}/{len(tickers)}件、"
+            f"閾値{MIN_FETCH_SUCCESS_RATIO:.0%}未満)。外部APIの障害の可能性があります。"
+        )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
     body = build_selection_report(ranked, signals_map, REGISTER_URL, REGISTER_TOKEN, preset["label"])

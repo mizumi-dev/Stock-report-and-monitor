@@ -86,8 +86,11 @@ def _cycle_window(series: pd.Series, unit: str) -> pd.Series:
     if unit == "day":
         return series.iloc[-1:]
     freq = "W-SUN" if unit == "week" else "M"
-    periods = series.index.to_period(freq)
-    prev_period = series.index[-1].to_period(freq) - 1
+    # yfinanceのインデックスは取引所タイムゾーン付き。暦週/暦月への丸めはタイムゾーンに
+    # 依存しないため、意図的にtz情報を落として警告を出さないようにする。
+    naive_index = series.index.tz_localize(None) if series.index.tz is not None else series.index
+    periods = naive_index.to_period(freq)
+    prev_period = naive_index[-1].to_period(freq) - 1
     window = series[periods == prev_period]
     return window if not window.empty else series.iloc[-1:]
 

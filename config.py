@@ -11,6 +11,13 @@ MIN_GROWTH = 0.20   # 利益成長率の下限
 MAX_PEG = 3.0       # PEGレシオの上限
 DEFAULT_TOP_N = 3
 
+# ===== 外部API障害耐性 =====
+# 選定レポートで銘柄データ取得の成功率がこれを下回ったら、空同然のレポートを送らず
+# 例外を送出してエラー通知に切り替える(個別銘柄のたまたまの失敗ではなく、
+# 外部APIそのものが落ちていると判断できる水準)
+MIN_FETCH_SUCCESS_RATIO = 0.5
+NASDAQ100_CACHE_KEY = "nasdaq100_tickers_cache"
+
 # ===== トレンド判定の方式 =====
 # "MA"(移動平均線) または "MACD"。現在はMAのみ運用。
 MA_OR_MACD = "MA"
