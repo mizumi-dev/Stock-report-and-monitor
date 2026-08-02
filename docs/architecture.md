@@ -110,8 +110,8 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 | | `approved_tokens` | **GetItem, Scan**(※2) |
 | | SES | SendEmail |
 | `stock-report-register-role`(register-stock) | `watchlist` | PutItem, DeleteItem, Scan, **Query**(※2) |
-| | `approved_tokens` | GetItem, **PutItem, Scan**(※2) |
-| | `app_settings` | GetItem, PutItem |
+| | `approved_tokens` | GetItem, PutItem, Scan, **DeleteItem**(※3) |
+| | `app_settings` | GetItem, PutItem, **DeleteItem**(※3) |
 | | `daily-batch`関数 | InvokeFunction |
 | | SES | **SendEmail**(※2、申込み確認メール用) |
 | `scheduler-invoke-batch-role` | `daily-batch`関数 | InvokeFunction |
@@ -120,6 +120,14 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 | | `watchlist`/`approved_tokens`/`app_settings`/`signal_history` | DeleteTable, CreateTable, UpdateItem, Query(マルチテナント化のテーブル移行作業用) |
 
 ※2: マルチテナント化(2026-08-02)で追加。`deploy.sh`にも反映済み。
+
+※3: 自己退会機能(2026-08-02)追加時に権限付与が漏れており、実際に退会操作を行った
+利用者で本番エラー(500)が発生して発覚。`watchlist`にはDeleteItemがあったため
+監視リストの削除だけ成功し、`app_settings`の削除でエラー→処理中断となり、
+`approved_tokens`の削除まで到達せずアクセス用トークンが無効化されない状態になった
+（データはこの状態で壊れてはいないが、退会自体は未完了だった）。
+`iam:PutRolePolicy`を`stock-report-register-role`に限定して追加発行してもらい、
+本番ロールに直接反映して解消。`deploy.sh`にも反映済み。
 
 ※1: TODO#2（NASDAQ100銘柄キャッシュ）の実装時、`daily-batch`ロールに`app_settings`への
 `PutItem`権限が不足していることが本番の403エラーで判明し、`aws iam put-role-policy`で
