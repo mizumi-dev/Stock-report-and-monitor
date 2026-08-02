@@ -183,7 +183,7 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
@@ -239,7 +239,7 @@ aws lambda update-function-configuration \
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
 aws lambda update-function-configuration \
   --function-name register-stock \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
   --region $AWS_REGION
 
 echo "=== 9. EventBridge Scheduler 設定(毎日 米東部17時=UTC22時 平日) ==="

@@ -13,6 +13,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from boto3.dynamodb.conditions import Key
 
 from fake_dynamodb import FakeDynamoDBResource
 
@@ -43,6 +44,7 @@ def rh():
     module.ses = mock.MagicMock()
     module.REGISTER_FUNCTION_URL = "https://example.com/"
     module.SES_SENDER = "sender@example.com"
+    module.SES_RECIPIENT = "admin@example.com"
     return module
 
 
@@ -75,6 +77,17 @@ class TestAuth:
         r = rh.handler(_event(terms="1"), None)
         assert r["statusCode"] == 200
         assert "利用規約" in r["body"]
+
+    def test_about_page_accessible_without_token(self, rh):
+        r = rh.handler(_event(about="1"), None)
+        assert r["statusCode"] == 200
+        assert "運営者情報" in r["body"]
+        assert "個人が開発" in r["body"]
+
+    def test_contact_form_accessible_without_token(self, rh):
+        r = rh.handler(_event(contact="1"), None)
+        assert r["statusCode"] == 200
+        assert "お問い合わせ" in r["body"]
 
     def test_manifest_accessible_without_token(self, rh):
         r = rh.handler(_event(manifest="1"), None)
@@ -186,6 +199,75 @@ class TestTickerRegistration:
 
         r = rh.handler(_event(token="other-tok"), None)
         assert "NVDA" in r["body"]  # 他人が削除しても自分の登録は残る
+
+
+class TestContact:
+    def test_contact_sends_email_to_recipient_with_reply_to(self, rh):
+        r = rh.handler(_event(
+            contact_submit="1", contact_email="user@example.com",
+            contact_message="teardown", captcha_n1="2", captcha_n2="3", captcha_answer="5",
+        ), None)
+        assert r["statusCode"] == 200
+        assert rh.ses.send_email.called
+        kwargs = rh.ses.send_email.call_args.kwargs
+        assert kwargs["Destination"]["ToAddresses"] == ["admin@example.com"]
+        assert kwargs["ReplyToAddresses"] == ["user@example.com"]
+
+    def test_contact_invalid_email_rejected(self, rh):
+        r = rh.handler(_event(
+            contact_submit="1", contact_email="not-an-email",
+            contact_message="hi", captcha_n1="2", captcha_n2="3", captcha_answer="5",
+        ), None)
+        assert r["statusCode"] == 400
+        assert not rh.ses.send_email.called
+
+    def test_contact_empty_message_rejected(self, rh):
+        r = rh.handler(_event(
+            contact_submit="1", contact_email="user@example.com",
+            contact_message="", captcha_n1="2", captcha_n2="3", captcha_answer="5",
+        ), None)
+        assert r["statusCode"] == 400
+        assert not rh.ses.send_email.called
+
+    def test_contact_wrong_captcha_rejected(self, rh):
+        r = rh.handler(_event(
+            contact_submit="1", contact_email="user@example.com",
+            contact_message="hi", captcha_n1="2", captcha_n2="3", captcha_answer="99",
+        ), None)
+        assert r["statusCode"] == 400
+        assert not rh.ses.send_email.called
+
+
+class TestAccountDeletion:
+    def test_delete_requires_confirmation_step(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, delete_account="1"), None)
+        assert r["statusCode"] == 200
+        assert "削除を実行する" in r["body"]
+        # 確認画面を出しただけではまだ削除されていない
+        assert rh.dynamodb.Table("approved_tokens").get_item(Key={"token": VALID_TOKEN})["Item"]
+
+    def test_delete_confirm_removes_token_watchlist_and_period_mode(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
+        rh.handler(_event(token=VALID_TOKEN, mode="SHORT"), None)
+
+        r = rh.handler(_event(token=VALID_TOKEN, delete_account_confirm="1"), None)
+        assert r["statusCode"] == 200
+        assert "退会が完了しました" in r["body"]
+
+        assert "Item" not in rh.dynamodb.Table("approved_tokens").get_item(Key={"token": VALID_TOKEN})
+        assert rh.dynamodb.Table("watchlist").query(
+            KeyConditionExpression=Key("owner_token").eq(VALID_TOKEN)
+        )["Items"] == []
+        assert rh.get_period_mode(VALID_TOKEN) == "MID"  # トークン失効後は既定モード扱いに戻る
+
+        # 削除後は同じトークンでアクセスしても無効(お申込みフォームに戻る)
+        r2 = rh.handler(_event(token=VALID_TOKEN), None)
+        assert r2["statusCode"] == 403
+
+    def test_delete_requires_valid_token(self, rh):
+        r = rh.handler(_event(token="bogus", delete_account_confirm="1"), None)
+        assert r["statusCode"] == 403
+        assert "お申込み" in r["body"]
 
 
 class TestPeriodMode:

@@ -40,6 +40,7 @@ SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
 MAX_WATCHLIST_SIZE = int(os.environ.get("MAX_WATCHLIST_SIZE", "5"))
 DAILY_BATCH_FUNCTION = os.environ.get("DAILY_BATCH_FUNCTION", "daily-batch")
 SES_SENDER = os.environ.get("SES_SENDER", "")
+SES_RECIPIENT = os.environ.get("SES_RECIPIENT", "")
 REGISTER_FUNCTION_URL = os.environ.get("REGISTER_FUNCTION_URL", "")
 
 dynamodb = boto3.resource("dynamodb")
@@ -77,6 +78,45 @@ _SITE_DESCRIPTION = (
 )
 
 
+# 個人開発のLambda単体サービスであることが伝わるよう、外部CSS/フォントは使わず
+# この<style>だけで見た目を完結させる(装飾ゼロだと不審に見えるとの指摘への対応)
+_PAGE_STYLE = """
+:root{--bg:#f4f6f9;--card:#ffffff;--ink:#161a22;--ink-muted:#5a6270;
+  --border:#e1e4ea;--accent:#16a34a;--accent-ink:#ffffff;--danger:#b91c1c;
+  --notice-bg:#eafbf0;--notice-border:#bbf0cf;--notice-ink:#166534;}
+*{box-sizing:border-box;}
+body{background:var(--bg);color:var(--ink);margin:0;padding:28px 14px;line-height:1.6;
+  font-family:-apple-system,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;}
+.card{max-width:440px;margin:0 auto;background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:24px 20px;box-shadow:0 1px 2px rgba(20,24,33,.05),0 8px 24px -12px rgba(20,24,33,.15);}
+h1{font-size:1.25em;margin:0 0 6px;}
+h3{font-size:1.05em;margin:22px 0 8px;}
+h3:first-child{margin-top:0;}
+h4{font-size:.95em;margin:16px 0 6px;}
+p{margin:0 0 12px;}
+a{color:var(--accent);text-decoration:none;}
+a:hover,a:focus-visible{text-decoration:underline;}
+a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,button:focus-visible{
+  outline:2px solid var(--accent);outline-offset:1px;}
+input,select,textarea{border:1px solid var(--border);border-radius:8px;padding:9px 11px;
+  font-size:16px;font-family:inherit;background:var(--card);color:var(--ink);}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);}
+button{background:var(--accent);color:var(--accent-ink);border:none;border-radius:8px;
+  padding:10px 16px;font-size:15px;font-weight:600;cursor:pointer;}
+button:hover{opacity:.9;}
+button.danger{background:var(--danger);}
+.notice{background:var(--notice-bg);border:1px solid var(--notice-border);color:var(--notice-ink);
+  padding:10px 14px;border-radius:8px;margin-bottom:16px;}
+.muted{color:var(--ink-muted);font-size:12.5px;}
+hr{border:none;border-top:1px solid var(--border);margin:20px 0;}
+ul,ol{padding-left:20px;}
+table{border-collapse:collapse;width:100%;font-size:13px;}
+code{background:#eef0f4;padding:1px 5px;border-radius:4px;}
+label{display:block;margin-bottom:12px;}
+.site-footer{max-width:440px;margin:16px auto 0;text-align:center;}
+"""
+
+
 def _page(inner_html: str, status=200):
     return _response(
         f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -87,9 +127,15 @@ def _page(inner_html: str, status=200):
         <link rel="manifest" href="?manifest=1">
         <link rel="apple-touch-icon" href="{_ICON_DATA_URI}">
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-title" content="株式レポート"></head>
-        <body style="font-family:sans-serif;max-width:420px;margin:40px auto;padding:0 12px;">
+        <meta name="apple-mobile-web-app-title" content="株式レポート">
+        <style>{_PAGE_STYLE}</style></head>
+        <body>
+        <div class="card">
         {inner_html}
+        </div>
+        <p class="site-footer muted">
+          <a href="?about=1">運営者情報</a> ・ <a href="?contact=1">お問い合わせ</a> ・
+          <a href="?privacy=1">プライバシーポリシー</a> ・ <a href="?terms=1">利用規約</a></p>
         </body></html>""",
         status=status,
     )
@@ -200,33 +246,37 @@ def _trigger_report(report: str, owner_token: str):
 
 def _render_signup_form(notice: str = "") -> str:
     n1, n2 = random.randint(1, 9), random.randint(1, 9)
-    notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
+    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
     return f"""
     {notice_html}
-    <h1 style="font-size:1.3em;">PegSignal（株式レポートサービス）</h1>
+    <h1>PegSignal（株式レポートサービス）</h1>
+    <p class="muted">個人が開発・運営しているサービスです。運営者について詳しくは
+    <a href="?about=1">運営者情報</a>をご覧ください。</p>
     <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
     低く割安な成長株を選定し、無料でメール配信します。登録した銘柄については、
     トレンド・モメンタム・出来高の3種類のシグナルを毎日監視して通知します。</p>
-    <p style="color:#888;font-size:12px;">
+    <p class="muted">
     ※投資助言ではありません。判定はYahoo Financeが提供するデータに基づいており、
     正確性・遅延について当サービスは保証しません。詳しくは
     <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
 
     <h3>お申込み</h3>
-    <p>メールアドレスを入力すると、確認メールが届きます。リンクをクリックすると登録が完了します。</p>
+    <p>メールアドレスを入力すると、確認メールが届きます。リンクをクリックすると登録が完了します。
+    ご登録いただいたメールアドレスは<strong>レポート配信・ログイン用リンクの送信にのみ</strong>
+    使用し、第三者への提供は行いません。</p>
     <form method="GET">
       <input name="signup_email" type="email" placeholder="example@example.com"
-             style="padding:8px;font-size:16px;width:100%;box-sizing:border-box;" required>
-      <p>簡単な確認: {n1} + {n2} = <input name="captcha_answer" style="width:60px;padding:4px;" required></p>
+             style="width:100%;" required>
+      <p>簡単な確認: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
       <input type="hidden" name="captcha_n1" value="{n1}">
       <input type="hidden" name="captcha_n2" value="{n2}">
-      <button type="submit" style="padding:8px 16px;">申し込む</button>
+      <button type="submit">申し込む</button>
     </form>
-    <p style="color:#888;font-size:12px;">
+    <p class="muted">
       お申込みは <a href="?terms=1">利用規約</a>・<a href="?privacy=1">プライバシーポリシー</a>
       への同意とみなされます。本サービスは日本・米国在住の方向けです。
       <strong>欧州経済領域(EEA)・英国・スイス在住の方はお申込みをご遠慮ください。</strong></p>
-    <p style="color:#888;font-size:12px;">既に招待リンクをお持ちの場合は、そのリンクからアクセスしてください。</p>
+    <p class="muted">既に招待リンクをお持ちの場合は、そのリンクからアクセスしてください。</p>
     """
 
 
@@ -236,11 +286,17 @@ def _render_privacy() -> str:
     <p>収集する情報は<strong>メールアドレス・登録銘柄・判定期間モードの選択のみ</strong>です。
     クレジットカード等の決済情報、氏名・住所、IPアドレスのログ、Cookieによる行動追跡は
     一切行っていません。第三者への個人情報の提供・販売もありません。</p>
+    <p>データはAWSのマネージド型データベース(DynamoDB)に保管しており、招待トークンを
+    知らない第三者はアクセスできません。ただし本サービスは個人開発のため、大規模な
+    セキュリティ監査は実施していません。パスワード等の機密情報の入力は不要な設計に
+    しています(メールアドレスのみでご利用いただけます)。</p>
     <p>将来、Webページ上に非パーソナライズ広告またはアフィリエイトリンクを掲載する
     可能性がありますが、その場合も個人を特定・追跡する形での広告配信は行いません。</p>
     <p>本サービスは日本国内・米国在住の方を対象としています。
     <strong>欧州経済領域(EEA)・英国・スイス在住の方は対象外です。</strong></p>
-    <p>登録情報の削除・開示をご希望の場合は <code>mohatose4929@gmail.com</code> までご連絡ください。</p>
+    <p>登録情報の削除は、アクセス用リンクから<strong>ご自身でいつでも即時に</strong>行えます
+    （メイン画面の「退会」から）。アクセス用リンクを紛失した場合や、その他開示等の
+    ご希望は<a href="?contact=1">お問い合わせフォーム</a>からご連絡ください。</p>
     <p><a href="?">戻る</a></p>
     """
 
@@ -256,9 +312,59 @@ def _render_terms() -> str:
     <p>招待トークン(アクセスリンク)はご自身で管理してください。不正利用・過度な自動アクセス等が
     判明した場合、事前の通知なくアカウントを停止することがあります。</p>
     <p>本サービスは運営者の判断により、事前の通知なく機能変更・停止を行うことがあります。</p>
-    <p>詳細は <a href="?privacy=1">プライバシーポリシー</a> も参照してください。
-    お問い合わせ: <code>mohatose4929@gmail.com</code></p>
+    <p>詳細は <a href="?privacy=1">プライバシーポリシー</a>・<a href="?about=1">運営者情報</a>
+    も参照してください。お問い合わせは<a href="?contact=1">こちら</a>から。</p>
     <p><a href="?">戻る</a></p>
+    """
+
+
+def _render_about() -> str:
+    return """
+    <h3>運営者情報</h3>
+    <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
+    です。法人ではなく、企画・開発・運用のすべてを個人で行っています。</p>
+    <p>NASDAQ100構成銘柄からPEGレシオで割安な成長株を選定し、シグナルをメール配信する
+    無料サービスです。判定ロジックの詳細は<a href="?info=1">この仕組みについて</a>を
+    ご覧ください。</p>
+
+    <h4>メールアドレスの取り扱いについて</h4>
+    <p>ご登録いただくメールアドレスは、<strong>レポート配信・ログイン用リンクの送信にのみ</strong>
+    使用します。広告・マーケティング目的での第三者提供は一切行いません。保管方法や
+    削除方法の詳細は<a href="?privacy=1">プライバシーポリシー</a>をご覧ください。</p>
+
+    <h4>お問い合わせ</h4>
+    <p>ご質問・ご要望は<a href="?contact=1">お問い合わせフォーム</a>からご連絡ください。
+    なお登録データの削除（退会）は、アクセス用リンクをお持ちであればお問い合わせ不要で
+    ご自身ですぐに行えます。</p>
+    <p><a href="?">トップに戻る</a></p>
+    """
+
+
+def _render_contact_form(notice: str = "") -> str:
+    n1, n2 = random.randint(1, 9), random.randint(1, 9)
+    notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    return f"""
+    {notice_html}
+    <h3>お問い合わせ</h3>
+    <p>ご質問・ご要望などを以下のフォームからお送りください。折り返しご連絡できるよう、
+    返信用のメールアドレスをご入力ください。</p>
+    <p class="muted">登録データの削除（退会）をご希望の場合、アクセス用リンクを
+    お持ちであればメイン画面の「退会」からお問い合わせ不要でご自身ですぐに削除できます。</p>
+    <form method="GET">
+      <input type="hidden" name="contact_submit" value="1">
+      <label>返信用メールアドレス
+        <input name="contact_email" type="email" placeholder="example@example.com"
+               style="width:100%;" required>
+      </label>
+      <label>お問い合わせ内容
+        <textarea name="contact_message" rows="5" style="width:100%;" required></textarea>
+      </label>
+      <p>簡単な確認: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
+      <input type="hidden" name="captcha_n1" value="{n1}">
+      <input type="hidden" name="captcha_n2" value="{n2}">
+      <button type="submit">送信する</button>
+    </form>
+    <p><a href="?">トップに戻る</a></p>
     """
 
 
@@ -316,8 +422,7 @@ def _render_form(token: str, notice: str = "") -> str:
 
     <hr style="margin:24px 0;">
     <p><a href="?token={t}&info=1">この仕組みについて（判定ロジック・データ元）</a></p>
-    <p style="color:#888;font-size:12px;">
-      <a href="?terms=1">利用規約</a> ・ <a href="?privacy=1">プライバシーポリシー</a></p>
+    <p class="muted"><a href="?token={t}&delete_account=1">退会（登録データを削除）</a></p>
     """
 
 
@@ -458,6 +563,82 @@ def _send_confirmation_email_reminder(email: str, token: str):
     )
 
 
+def _handle_contact(params: dict) -> dict:
+    email = (params.get("contact_email") or "").strip()
+    message = (params.get("contact_message") or "").strip()
+
+    if not EMAIL_RE.match(email):
+        return _page(
+            f'<p class="notice">返信用メールアドレスの形式が正しくありません。</p>{_render_contact_form()}',
+            status=400,
+        )
+    if not message:
+        return _page(
+            f'<p class="notice">お問い合わせ内容を入力してください。</p>{_render_contact_form()}',
+            status=400,
+        )
+    try:
+        n1, n2 = int(params.get("captcha_n1", "")), int(params.get("captcha_n2", ""))
+        answer = int(params.get("captcha_answer", ""))
+    except (TypeError, ValueError):
+        return _page(
+            f'<p class="notice">確認の回答が正しくありません。</p>{_render_contact_form()}',
+            status=400,
+        )
+    if answer != n1 + n2:
+        return _page(
+            f'<p class="notice">確認の回答が正しくありません。</p>{_render_contact_form()}',
+            status=400,
+        )
+
+    if SES_RECIPIENT:
+        ses.send_email(
+            Source=SES_SENDER,
+            Destination={"ToAddresses": [SES_RECIPIENT]},
+            ReplyToAddresses=[email],
+            Message={
+                "Subject": {"Data": "【PegSignal】お問い合わせ", "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": (
+                    f"<p>差出人(返信用): {html.escape(email)}</p>"
+                    f"<p>{html.escape(message)}</p>"
+                ), "Charset": "UTF-8"}},
+            },
+        )
+    return _page(
+        '<p class="notice">お問い合わせを受け付けました。折り返しご連絡します。</p>'
+        '<p><a href="?">トップに戻る</a></p>'
+    )
+
+
+def _render_delete_confirm(token: str) -> str:
+    t = html.escape(token)
+    return f"""
+    <h3>退会（登録データの削除）</h3>
+    <p>以下のデータが完全に削除されます。<strong>この操作は取り消せません。</strong></p>
+    <ul>
+      <li>登録メールアドレス</li>
+      <li>監視リストに登録した銘柄（すべて）</li>
+      <li>判定期間モードの設定</li>
+    </ul>
+    <p><a href="?token={t}&delete_account_confirm=1">
+      <button class="danger">削除を実行する</button></a></p>
+    <p><a href="?token={t}">キャンセルして戻る</a></p>
+    """
+
+
+def _handle_delete_account(token: str) -> dict:
+    watchlist_table = dynamodb.Table(WATCHLIST_TABLE)
+    for ticker in _current_watchlist(token):
+        watchlist_table.delete_item(Key={"owner_token": token, "ticker": ticker})
+    dynamodb.Table(SETTINGS_TABLE).delete_item(Key={"key": user_period_mode_key(token)})
+    dynamodb.Table(APPROVED_TOKENS_TABLE).delete_item(Key={"token": token})
+    return _page(
+        "<h3>退会が完了しました</h3>"
+        "<p>登録データはすべて削除されました。ご利用ありがとうございました。</p>"
+        '<p>またのご利用をお待ちしております。<a href="?">トップページ</a></p>'
+    )
+
+
 def _handle_confirm(token: str) -> dict:
     item = _get_token_item(token)
     if not item:
@@ -488,6 +669,15 @@ def handler(event, context):
     if params.get("terms"):
         return _page(_render_terms())
 
+    if params.get("about"):
+        return _page(_render_about())
+
+    if params.get("contact_submit"):
+        return _handle_contact(params)
+
+    if params.get("contact"):
+        return _page(_render_contact_form())
+
     if params.get("info"):
         # トークン未所持でも仕組みの説明は読めるようにする(SEO・信頼性向上のため公開)。
         # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
@@ -495,6 +685,14 @@ def handler(event, context):
 
     if not _is_valid_token(token):
         return _page(_render_signup_form(), status=403 if token else 200)
+
+    # 退会(登録データの自己削除)。トークンが有効な間だけ操作でき、
+    # お問い合わせフォーム経由の手動対応を待たずにその場で完結する
+    if params.get("delete_account_confirm"):
+        return _handle_delete_account(token)
+
+    if params.get("delete_account"):
+        return _page(_render_delete_confirm(token))
 
     # 期間モードの変更
     if params.get("mode"):
