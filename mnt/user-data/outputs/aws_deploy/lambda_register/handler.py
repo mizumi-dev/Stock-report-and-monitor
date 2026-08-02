@@ -161,6 +161,18 @@ def _render_form(token: str, notice: str = "") -> str:
     """
 
 
+_CYCLE_LABEL = {
+    "day": "当日の値",
+    "week": "前の暦週の取引日平均",
+    "month": "前の暦月の取引日平均",
+}
+_SEND_FREQ_LABEL = {
+    "SHORT": "毎日（平日）",
+    "MID": "毎週月曜",
+    "LONG": "月初の月曜（月1回）",
+}
+
+
 def _render_info(token: str) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
@@ -174,18 +186,21 @@ def _render_info(token: str) -> str:
             f"<tr><td style='padding:4px 8px;'><strong>{p['label']}{mark}</strong></td>"
             f"<td style='padding:4px 8px;'>{p['ma_short']}日線 × {p['ma_long']}日線{filt}</td>"
             f"<td style='padding:4px 8px;'>RSI{p['rsi_period']}<br>"
-            f"{p['rsi_recovery']}以下から上昇で買い / {p['rsi_overbought']}以上で警告</td></tr>"
+            f"{p['rsi_oversold']}以下で買い / {p['rsi_overbought']}以上で売り<br>"
+            f"({_CYCLE_LABEL[p['cycle_unit']]}で判定)</td>"
+            f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL[key]}</td></tr>"
         )
     table = (
         "<table style='border-collapse:collapse;font-size:13px;'>"
         "<tr><th style='padding:4px 8px;'>モード</th><th style='padding:4px 8px;'>トレンド</th>"
-        "<th style='padding:4px 8px;'>モメンタム</th></tr>" + "".join(rows) + "</table>"
+        "<th style='padding:4px 8px;'>モメンタム</th><th style='padding:4px 8px;'>選定レポート頻度</th></tr>"
+        + "".join(rows) + "</table>"
     )
 
     return f"""
     <h3>このサービスの仕組み</h3>
 
-    <h4>📈 選定レポート（週次）</h4>
+    <h4>📈 選定レポート</h4>
     <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）</p>
     <p>次の条件を両方満たす銘柄だけを候補にします:</p>
     <ul>
@@ -196,9 +211,11 @@ def _render_info(token: str) -> str:
     <p>PEG・利益成長率・時価総額・株価は <strong>Yahoo Finance（yfinanceライブラリ）</strong> から取得しています。
     PEGは「株価収益率(PER) ÷ 利益成長率」で、低いほど成長性に対して割安とされる指標です。
     Yahoo Financeが算出した値をそのまま使っており、当サービスで再計算はしていません。</p>
+    <p>発行頻度はモードによって異なります（短期=毎日、中期=毎週月曜、長期=月初の月曜で月1回）。
+    詳しくは下表を参照してください。</p>
 
     <h4>📊 監視レポート（日次）</h4>
-    <p>登録した銘柄について、3種類のシグナルを判定します。</p>
+    <p>登録した銘柄について、3種類のシグナルを判定します。監視レポートは全モード共通で毎日送ります。</p>
 
     <p><strong>トレンド</strong>は次の2つのどちらかが成立すると点灯します:</p>
     <ul>
@@ -207,19 +224,24 @@ def _render_info(token: str) -> str:
       <li><strong>並び順</strong>: 株価・各移動平均線が上から順にきれいに並んでいる状態。
       トレンドが続く限り毎日点灯します。</li>
     </ul>
+    <p>トレンドは全モード共通で日足データを使って判定します。</p>
 
-    <p><strong>モメンタム</strong>はRSIで判定します。買いは「一定水準まで下げた後、上昇に転じた」ことを見ます
-    （単純な売られすぎ判定より反転の兆しを捉える意図です）。</p>
+    <p><strong>モメンタム</strong>はRSIで判定します。判定サイクル分（短期=当日、中期=前の週、長期=前の月の
+    実際の取引日）のRSI平均が、売られすぎの水準以下なら買い、買われすぎの水準以上なら売りです
+    （閾値を跨いだ時点で対称に判定します）。中期・長期では、休場日があった週・月はその分を除いた
+    日数で平均します。</p>
 
-    <p><strong>出来高</strong>は過去N日平均の{PERIOD_PRESETS[mode]['volume_multiplier']}倍を超えたら「急増」と表示します
+    <p><strong>出来高</strong>は判定サイクル分の平均出来高が、基準値の
+    {PERIOD_PRESETS[mode]['volume_multiplier']}倍を超えたら「急増」と表示します
     （{PERIOD_PRESETS[mode]['volume_lookback']}日平均・{PERIOD_PRESETS[mode]['label']}モードの場合）。
+    中期・長期の基準値は、判定期間そのものは含めず、その直前の期間だけで計算します。
     買い／売りの方向は持たない参考指標です。</p>
 
     <h4>期間モードごとの設定値</h4>
     {table}
     <p style="color:#888;font-size:12px;">
-      短期は反応が早いぶん騙しも多く、長期は点灯頻度が年に数回程度まで下がります。
-      シグナルが出ない日が続くのは長期モードでは正常な状態です。</p>
+      短期は反応が早いぶん騙しも多く、長期は点灯頻度が下がります。
+      シグナルが出ない期間が続くのは長期モードでは正常な状態です。</p>
 
     <p style="color:#888;font-size:12px;">
       🟢/⚪のランプは上記シグナルの点灯有無を表示しているだけで、複数条件を合成したスコアではありません。</p>

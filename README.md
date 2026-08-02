@@ -1,5 +1,17 @@
 # 株式レポートサービス デプロイ手順
 
+## サービスURL（銘柄登録・削除・期間モード変更・仕組みの説明）
+
+```
+https://limtvgcrufuum3of3htggiovwa0vxxaj.lambda-url.us-east-1.on.aws/?token=<招待トークン>
+```
+
+招待トークンは`approved_tokens`テーブルに保存されている（パスワード相当、他人に
+共有しないこと）。忘れた場合の再確認:
+```bash
+aws dynamodb scan --table-name approved_tokens --region us-east-1
+```
+
 事前検証済み: シグナル計算・ランキング・レポート生成・Lambda Layerビルドは
 このドキュメント作成時に実データで動作確認済みです。
 AWS CLIコマンド自体は（AWSアカウントへの実行権限がないため）未実行です。

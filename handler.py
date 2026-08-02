@@ -2,13 +2,19 @@
 daily-batch Lambda ハンドラ
 毎日1回、EventBridge Schedulerから起動される想定
 """
+import html
 import os
+import traceback
 import boto3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from config import (
     DEFAULT_PERIOD_MODE,
+    FETCH_MAX_WORKERS,
+    MIN_FETCH_SUCCESS_RATIO,
+    NASDAQ100_CACHE_KEY,
     PERIOD_MODE_KEY,
     SETTINGS_TABLE_DEFAULT,
     get_preset,
@@ -51,6 +57,31 @@ def get_period_mode() -> str:
     except Exception as e:
         print(f"[WARN] 期間モードの取得に失敗、既定値({DEFAULT_PERIOD_MODE})を使用: {e}")
         return DEFAULT_PERIOD_MODE
+
+
+def get_cached_tickers() -> list[str] | None:
+    """前回成功時に保存したNASDAQ100構成銘柄リスト。Nasdaq API障害時のフォールバック用。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
+        tickers = resp.get("Item", {}).get("value")
+        return list(tickers) if tickers else None
+    except Exception as e:
+        print(f"[WARN] 銘柄キャッシュの取得に失敗: {e}")
+        return None
+
+
+def save_cached_tickers(tickers: list[str]):
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        table.put_item(Item={
+            "key": NASDAQ100_CACHE_KEY,
+            "value": tickers,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        # キャッシュ更新の失敗でレポート送信自体を止める必要はない
+        print(f"[WARN] 銘柄キャッシュの保存に失敗: {e}")
 
 
 def get_watchlist() -> list[str]:
@@ -96,15 +127,33 @@ def run_selection_report():
     """週次: NASDAQ100全銘柄をスキャンしてランキング上位N件のレポートを送る"""
     mode = get_period_mode()
     preset = get_preset(mode)
-    tickers = get_nasdaq100_tickers(fallback=None)
-    stocks, signals_map = [], {}
 
-    for t in tickers:
-        d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
-        if d.get("history") is None:
-            continue
-        stocks.append(d)
-        signals_map[t] = calc_all_signals(d["history"], mode)
+    cached = get_cached_tickers()
+    tickers = get_nasdaq100_tickers(fallback=cached)
+    save_cached_tickers(tickers)
+
+    # I/O待ちが支配的な逐次取得がボトルネックのため並列化する。非公式APIへの
+    # 負荷を抑えるため全並列ではなくFETCH_MAX_WORKERSで頭打ちにする。
+    stocks, signals_map = [], {}
+    with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+        fetched = executor.map(
+            lambda t: get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"]),
+            tickers,
+        )
+        for d in fetched:
+            if d.get("history") is None:
+                continue
+            stocks.append(d)
+            signals_map[d["ticker"]] = calc_all_signals(d["history"], mode)
+
+    # 個別銘柄のたまたまの失敗ではなく外部API自体が落ちている可能性が高い場合は、
+    # 中身がほぼ空のレポートを送らずエラー通知に切り替える(handler()のtry/exceptに乗せる)
+    success_ratio = len(stocks) / len(tickers) if tickers else 0
+    if success_ratio < MIN_FETCH_SUCCESS_RATIO:
+        raise RuntimeError(
+            f"銘柄データの取得成功率が低すぎます({len(stocks)}/{len(tickers)}件、"
+            f"閾値{MIN_FETCH_SUCCESS_RATIO:.0%}未満)。外部APIの障害の可能性があります。"
+        )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
     body = build_selection_report(ranked, signals_map, REGISTER_URL, REGISTER_TOKEN, preset["label"])
@@ -144,9 +193,7 @@ def run_monitoring_report():
     send_email("📊 本日の監視レポート", body)
 
 
-def handler(event, context):
-    event = event or {}
-
+def _dispatch(event: dict) -> dict:
     # 画面の「監視レポートを送る」ボタンから来た場合は監視のみ実行する
     if event.get("monitoring_only"):
         run_monitoring_report()
@@ -158,8 +205,44 @@ def handler(event, context):
         return {"statusCode": 200, "body": "OK"}
 
     # EventBridge Schedulerからの定期実行
+    # 選定レポートの送信頻度はモードで変える: 短期=毎日、中期=毎週指定曜日、
+    # 長期=月初(1〜7日)の指定曜日のみ(月1回)
     weekday = str(datetime.now(timezone.utc).weekday())
-    if weekday == IS_WEEKLY_REPORT_DAY:
+    day_of_month = datetime.now(timezone.utc).day
+    mode = get_period_mode()
+
+    is_report_weekday = weekday == IS_WEEKLY_REPORT_DAY
+    should_send_selection = (
+        mode == "SHORT"
+        or (mode == "MID" and is_report_weekday)
+        or (mode == "LONG" and is_report_weekday and day_of_month <= 7)
+    )
+    if should_send_selection:
         run_selection_report()
     run_monitoring_report()
     return {"statusCode": 200, "body": "OK"}
+
+
+def _notify_failure(event: dict, exc: Exception):
+    """失敗をメールで知らせる。通知自体が失敗しても呼び出し元の例外送出は止めない
+    (元の例外を握りつぶすと、CloudWatchのErrorsメトリクスに記録されず
+    無人実行が黙って失敗し続けるという、対応しようとしている問題そのものを再発させるため)。"""
+    try:
+        body = (
+            f"<p>daily-batchの実行中にエラーが発生しました。</p>"
+            f"<p>event: {html.escape(str(event))}</p>"
+            f"<pre>{html.escape(traceback.format_exc())}</pre>"
+        )
+        send_email("🚨 daily-batchが失敗しました", body)
+    except Exception as notify_exc:
+        print(f"[ERROR] 失敗通知メールの送信にも失敗しました: {notify_exc}")
+
+
+def handler(event, context):
+    event = event or {}
+    try:
+        return _dispatch(event)
+    except Exception as exc:
+        print(f"[ERROR] handler failed: {exc}")
+        _notify_failure(event, exc)
+        raise

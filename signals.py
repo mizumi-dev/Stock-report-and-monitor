@@ -78,27 +78,56 @@ def calc_trend_signal(df: pd.DataFrame, preset: dict) -> dict:
     }
 
 
+def _cycle_window(series: pd.Series, unit: str) -> pd.Series:
+    """判定サイクル分のウィンドウを返す。
+    "day"は当日のみ、"week"/"month"は前の暦週/暦月に実際にあった取引日だけを拾う
+    (休場日があれば自然に減る)。データ不足でウィンドウが空になった場合は
+    当日1件にフォールバックする(黙って全銘柄が判定不能になるのを防ぐため)。"""
+    if unit == "day":
+        return series.iloc[-1:]
+    freq = "W-SUN" if unit == "week" else "M"
+    # yfinanceのインデックスは取引所タイムゾーン付き。暦週/暦月への丸めはタイムゾーンに
+    # 依存しないため、意図的にtz情報を落として警告を出さないようにする。
+    naive_index = series.index.tz_localize(None) if series.index.tz is not None else series.index
+    periods = naive_index.to_period(freq)
+    prev_period = naive_index[-1].to_period(freq) - 1
+    window = series[periods == prev_period]
+    return window if not window.empty else series.iloc[-1:]
+
+
 def calc_momentum_signal(df: pd.DataFrame, preset: dict) -> dict:
     """RSIによる買い/売りモメンタムシグナル。
-    買いは「rsi_recovery以下まで下げた後、上昇に転じた」ことを見る
-    (単純な売られすぎ判定より、反転の兆しを捉える意図)。"""
+    判定サイクル分のRSI平均が、売られすぎ/買われすぎの閾値を跨いだら
+    即座にシグナルとする(対称な閾値判定)。"""
     close = df["Close"]
     rsi = _rsi(close, preset["rsi_period"])
-    latest_rsi = rsi.iloc[-1]
-    prev_rsi = rsi.iloc[-2]
+    judged = float(_cycle_window(rsi, preset["cycle_unit"]).mean())
 
-    buy = bool((latest_rsi <= preset["rsi_recovery"]) and (latest_rsi > prev_rsi))
-    sell = bool(latest_rsi >= preset["rsi_overbought"])
+    buy = bool(judged <= preset["rsi_oversold"])
+    sell = bool(judged >= preset["rsi_overbought"])
 
-    return {"buy_momentum": buy, "sell_momentum": sell, "rsi": round(float(latest_rsi), 1)}
+    return {"buy_momentum": buy, "sell_momentum": sell, "rsi": round(judged, 1)}
 
 
 def calc_volume_signal(df: pd.DataFrame, preset: dict) -> dict:
-    """出来高が過去N日平均の指定倍を超えているか（買い/売り方向を持たない中立指標）"""
+    """出来高が基準値の指定倍を超えているか（買い/売り方向を持たない中立指標）。
+    "day"モードは直近1日 vs 直近lookback日平均(当日を含む)。
+    "week"/"month"モードは判定サイクル平均 vs その直前lookback日平均
+    (判定期間は基準値の集計から除く、自己参照なし)。"""
     vol = df["Volume"]
-    avg = vol.rolling(window=preset["volume_lookback"]).mean().iloc[-1]
-    latest = vol.iloc[-1]
-    ratio = float(latest / avg) if avg else 0.0
+    unit = preset["cycle_unit"]
+    lookback = preset["volume_lookback"]
+    window = _cycle_window(vol, unit)
+    judged = float(window.mean())
+
+    if unit == "day":
+        baseline = float(vol.rolling(window=lookback).mean().iloc[-1])
+    else:
+        start_pos = vol.index.get_loc(window.index[0])
+        baseline_slice = vol.iloc[max(0, start_pos - lookback):start_pos]
+        baseline = float(baseline_slice.mean()) if len(baseline_slice) else 0.0
+
+    ratio = judged / baseline if baseline else 0.0
     return {"volume_high": bool(ratio >= preset["volume_multiplier"]), "volume_ratio": round(ratio, 2)}
 
 

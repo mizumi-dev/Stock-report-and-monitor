@@ -70,6 +70,8 @@ for i in 1 2 3 4 5; do
 done
 ```
 
+**The very first invoke right after a deploy can still hit a stale warm execution environment from before the update**, even after `LastUpdateStatus` reports `Successful` and `CodeSha256` matches your local zip's hash — observed repeatedly on this project (a removed diagnostic code path answered once after its own redeploy, then correctly disappeared on the next two invokes; a logging fix behaved the same way). Don't trust a single post-deploy invoke, especially right after two deploys in quick succession — invoke 2-3 times and expect the *later* ones to reflect the new code, not necessarily the first.
+
 If a deploy's result looks impossibly wrong (e.g. the response matches code you replaced two deploys ago), verify by comparing `CodeSha256` against a local hash of the zip before theorizing:
 
 ```bash
@@ -103,3 +105,5 @@ git push origin <local-branch>:<remote-branch>
 If the remote branch diverged (e.g. the user manually applied a patch you sent before you had push access), diff your commit against the remote tip before force-pushing — identical trees mean it's a rebase artifact and `--force-with-lease` is safe; differing trees mean merge instead of clobbering their work.
 
 Session-injected credentials can reset `git remote set-url` between turns, the same way env vars override `AWS_PROFILE`. If a push fails after you set the PAT URL, re-check the remote before assuming the token is bad.
+
+**Never store the PAT value itself in any file that gets committed to the repo** (including skill files) — skills here are git-tracked, so a token written into one would leak into git history permanently, visible to anyone with read access, even after later removal. If a push fails with the remote reset to the internal proxy, just ask the user to paste the PAT again (or confirm the previously-issued one is still valid) and re-run `git remote set-url` — don't try to work around it by persisting the secret in tracked files. The remote URL with the embedded token lives only in the local, untracked git config, and is lost on container/session restart — that's expected, not a bug to fix by storing it somewhere durable.
