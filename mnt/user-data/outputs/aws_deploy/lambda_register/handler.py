@@ -70,9 +70,19 @@ _ICON_SVG = (
 _ICON_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(_ICON_SVG.encode()).decode()
 
 
+_SITE_TITLE = "PegSignal（株式レポートサービス） | NASDAQ100 成長株シグナル配信"
+_SITE_DESCRIPTION = (
+    "PEGレシオで割安な成長株をNASDAQ100構成銘柄から選定し、"
+    "トレンド・モメンタム・出来高のシグナルを毎日メールで通知する無料サービスです。"
+)
+
+
 def _page(inner_html: str, status=200):
     return _response(
         f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta charset="utf-8">
+        <title>{_SITE_TITLE}</title>
+        <meta name="description" content="{_SITE_DESCRIPTION}">
         <meta name="theme-color" content="#0f172a">
         <link rel="manifest" href="?manifest=1">
         <link rel="apple-touch-icon" href="{_ICON_DATA_URI}">
@@ -193,7 +203,16 @@ def _render_signup_form(notice: str = "") -> str:
     notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
     return f"""
     {notice_html}
-    <h3>株式レポートサービスへのお申込み</h3>
+    <h1 style="font-size:1.3em;">PegSignal（株式レポートサービス）</h1>
+    <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
+    低く割安な成長株を選定し、無料でメール配信します。登録した銘柄については、
+    トレンド・モメンタム・出来高の3種類のシグナルを毎日監視して通知します。</p>
+    <p style="color:#888;font-size:12px;">
+    ※投資助言ではありません。判定はYahoo Financeが提供するデータに基づいており、
+    正確性・遅延について当サービスは保証しません。詳しくは
+    <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
+
+    <h3>お申込み</h3>
     <p>メールアドレスを入力すると、確認メールが届きます。リンクをクリックすると登録が完了します。</p>
     <form method="GET">
       <input name="signup_email" type="email" placeholder="example@example.com"
@@ -469,11 +488,13 @@ def handler(event, context):
     if params.get("terms"):
         return _page(_render_terms())
 
+    if params.get("info"):
+        # トークン未所持でも仕組みの説明は読めるようにする(SEO・信頼性向上のため公開)。
+        # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
+        return _page(_render_info(token))
+
     if not _is_valid_token(token):
         return _page(_render_signup_form(), status=403 if token else 200)
-
-    if params.get("info"):
-        return _page(_render_info(token))
 
     # 期間モードの変更
     if params.get("mode"):

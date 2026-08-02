@@ -34,7 +34,20 @@
     `start_url`は意図的に省略し、招待トークン付きURLがそのまま起動先になるようにした
   - [x] 3. daily-batchのタイムアウトを300秒→900秒に変更（`deploy.sh`）。
     **この環境のAWS認証情報が無効なため未反映。次回`deploy.sh`実行時に反映される**
-  - [ ] 2. SEOランディングページはドメイン取得完了待ち
+  - [x] 2. `pegsignal.com`取得完了（2026-08-02）。別サイトは新設せず、既存の
+    register-stock Lambdaが返すHTMLをCloudFront経由でそのまま出す方針とした
+    （コンテンツの二重管理を避けるため）。実装内容:
+    - `<title>`・`meta description`をLambdaのHTML出力に追加（今までSEOタグが皆無だった）
+    - 申込みフォーム(未登録者にも見える実質的な公開ランディングページ)にPEGレシオでの
+      選定方法・シグナル監視の説明文を追加
+    - `?info=1`（仕組みの説明ページ）をトークン必須のガードから外し、未登録者でも
+      読めるように変更（SEO・信頼性向上のため）
+    - `deploy_domain.sh`を新規作成: ACM証明書(DNS検証)・CloudFrontディストリビューション
+      （オリジン=register-stockのFunction URL、CachingDisabled+
+      AllViewerExceptHostHeaderでクエリ文字列を全転送）・Route53 ALIASレコードを設定し、
+      `pegsignal.com`をそのままLambdaの出力に向ける
+    - **このスクリプトは未実地検証**（この環境のAWS認証情報が無効なため）。
+      実行後は`https://pegsignal.com/`・`?privacy=1`・`?info=1`の表示確認が必要
   - [ ] 4. S&P500追加は集客チャネル展開後
 
 ## mainマージ前の最終確認（2026-08-02）

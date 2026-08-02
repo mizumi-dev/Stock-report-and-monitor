@@ -66,6 +66,11 @@ class TestAuth:
         assert r["statusCode"] == 200
         assert "プライバシーポリシー" in r["body"]
 
+    def test_info_page_accessible_without_token(self, rh):
+        r = rh.handler(_event(info="1"), None)
+        assert r["statusCode"] == 200
+        assert "このサービスの仕組み" in r["body"]
+
     def test_terms_page_accessible_without_token(self, rh):
         r = rh.handler(_event(terms="1"), None)
         assert r["statusCode"] == 200
