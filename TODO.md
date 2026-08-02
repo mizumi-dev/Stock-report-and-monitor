@@ -40,16 +40,14 @@ CloudWatchのErrorsメトリクスには引き続き記録される（通知が�
 リスクとのトレードオフ。`test-skip-review`スキルでのレビュー結果は下記7bを参照）。
 デプロイ済み（`daily-batch`、CodeSha256確認済み）。
 
-### 7b. 本番で「例外捕捉→通知」経路を安全に検証する仕組みがない
+### 7b. 本番で「例外捕捉→通知」経路を安全に検証する仕組みがない — 対応済み（2026-08-02）
 
-TODO#1のエラー通知実装で、`_notify_failure`が実際にSES送信まで動くかを本番環境で
-確認する安全な手段が現状ない（コードを一時的に壊して戻す以外の方法がない）。
-`test-skip-review`スキルでのレビュー結果: 今回は`send_email`自体が同日中に別経路で
-実地確認済みのため許容してスキップしたが、恒久的な穴として記録する。
-
-対応案: TODO#7a（日付の外部注入）と同じ発想で、`event.get("_test_trigger_failure")`の
-ような形でテスト時だけ意図的に例外を起こせるフックを設ける。TODO#4（自動テスト整備）
-着手時にまとめて対応するのが効率的。
+TODO#4段階3で対応。`event.get("_test_trigger_failure")`があれば実データに一切触れず
+即座に例外を送出するフックを追加。実AWS環境で2回invokeし、両方とも
+`FunctionError: Unhandled`（CloudWatchのErrorsメトリクスに記録される）で終了し、
+かつ`--log-type Tail`のログに通知メール送信失敗の警告が出ていないことから、
+`_notify_failure`のSES送信が実際に成功していることを確認済み。
+`tests/test_error_notification.py`でユニットテストも追加（3件、モック経由）。
 
 ### 2. 外部API障害に対する耐性がない — 対応済み（2026-08-02）
 
@@ -103,22 +101,58 @@ Yahoo Financeへの通信がネットワークポリシーでブロックされ�
 
 ## 優先度: 中（今は困らないが、育てるなら要る）
 
-### 4. 自動テストとCIがない
+### 4. 自動テストとCIがない — 段階1完了（2026-08-02）
 
-現在のテストは、開発中にその場で書いた使い捨てスクリプトのみでリポジトリに残っていない。
-次に変更したとき（未来の自分を含む）にデグレを検知できない。
+`expert-panel-review`での検討により4段階に分割して着手:
 
-対応案:
-- `tests/` に pytest を置く。DynamoDB は 20行程度のインメモリfakeで代用できる
-  （moto はこの環境では cryptography/pyo3 依存が壊れていて動かなかった）
-- 特に守りたいのは: シグナル判定（合成データで各モードの点灯を確認）、
-  トークン認証、監視リストの上限、ティッカー検証
-- GitHub Actions で push 時に走らせる
+- [x] 段階1: `tests/`にpytest基盤を作成。`signals.py`のシグナル計算(`_cycle_window`の
+      休日除外・タイムゾーン警告なし、RSI対称閾値、出来高の自己参照なし)と
+      `handler.py`の選定レポート送信可否判定(`should_send_selection`、モード×曜日×
+      月初日の全パターン)をユニットテスト化。20件全てpass。副産物として
+      `should_send_selection`を独立関数に切り出し、TODO#7a(日付注入)も
+      `simulate_date`イベントフラグで解決（実AWS環境で動作確認済み）
+- [x] 段階2: `tests/fake_dynamodb.py`にDynamoDBの軽量fakeを実装し、register-stock
+      (`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)のコンポーネント
+      テストを追加（認証、ティッカー登録・削除・重複・検証、監視リスト上限、
+      期間モード切替）。daily-batch側と同名の`handler.py`が別ディレクトリに存在する
+      問題は`importlib.util.spec_from_file_location`で別名ロードして回避。
+      合計31件全てpass
+- [x] 段階3: TODO#7b対応。`_test_trigger_failure`イベントフラグを追加し、実AWS環境で
+      障害通知経路(例外送出→CloudWatch記録→SES通知)を実地確認。ユニットテスト3件追加
+      (合計34件全てpass)
+- [x] 段階4: `.github/workflows/tests.yml`でpush/PR時に自動実行するCIを追加。
+      クリーンな仮想環境で`requirements-dev.txt`のみをインストールした状態での
+      pytest実行をローカルで事前検証済み（34件全てpass）
 
-### 5. 監視・ログの可視化がない
+**TODO#4は4段階すべて完了。**
 
-CloudWatch Logs に生ログはあるが、ダッシュボードもアラームもない。
-「ちゃんと動いているか」を確認する手段が手動 invoke しかない。
+対応案（元の記録）:
+- DynamoDB は 20行程度のインメモリfakeで代用できる（moto はこの環境では
+  cryptography/pyo3 依存が壊れていて動かなかった）
+
+### 5a. 画面・エラーメッセージの文言が文書化されていない
+
+register-stockの画面文言・エラーメッセージはコード内(`_render_form`/`_render_info`等)
+にしかなく、一覧化された文書がない。`expert-panel-review`での検討結果、独立した
+「製品仕様書」を新設するほどではないが（`docs/requirements.md`が実質その役割を
+既に果たしている）、文言一覧はいずれ`docs/requirements.md`への軽い追記で対応する
+価値がある。優先度は低い。
+
+### 5. 監視・ログの可視化がない — 対応済み（2026-08-02）
+
+`expert-panel-review`での検討結果、ダッシュボードまでは作らずCloudWatch Alarm(1個)
++SNS+メール通知のみをコスト($0.10〜0.20/月程度)を確認した上で実装。TODO#1のSES直接
+通知が機能しない場合（Lambda自体が起動できない等）への二重の安全網として位置づけ。
+
+- CloudWatch Alarm `daily-batch-errors`(`AWS/Lambda`の`Errors`メトリクス>=1で発火)
+- SNSトピック`daily-batch-alarm-topic`経由でメール通知（購読確認済み）
+- `_test_trigger_failure`で実際に例外を発生させ、Alarmが`INSUFFICIENT_DATA`→`ALARM`
+  に遷移し、メール通知が実際に届くことを実地確認済み
+- `deploy.sh`にも追加済み（新規環境でも同じ構成が再現される）
+- 詳細は`docs/architecture.md`の「3a. 監視・通知リソース」を参照
+
+ダッシュボードは今回作らなかった（TODO.md備考: 追加で$3/月かかるため、必要になったら
+別途検討）。
 
 ### 6. 招待トークンの管理が手作業
 
@@ -127,17 +161,12 @@ CloudWatch Logs に生ログはあるが、ダッシュボードもアラーム�
 
 対応案: 管理者用トークンを1つ設け、画面から招待トークンの発行・失効ができるようにする
 
-### 7a. handler()の日付をテスト時に注入できない
+### 7a. handler()の日付をテスト時に注入できない — 対応済み（2026-08-02）
 
-`daily-batch`の`handler()`は選定レポート送信可否の判定に`datetime.now(timezone.utc)`を
-直接使っており、event経由で日付を差し替えられない。そのため「中期モードで月曜だけ送る」
-「長期モードで月初の月曜だけ送る」といった分岐を、実行日以外の曜日・日付条件で
-実地検証することができない（2026-08-02のテストではロジックを抽出した等価コードで
-代替検証した）。
-
-対応案: `event.get("simulate_date")`があればそれを使い、なければ`datetime.now()`を使う
-形にすれば、本番動作に影響を与えずテスト時だけ日付を差し替えられる。優先度は低いが、
-TODO#4（自動テスト整備）に着手する際は一緒に対応するのが効率的。
+TODO#4段階1で対応。`event.get("simulate_date")`があればそれを使い、なければ
+`datetime.now()`を使うようにした。あわせて送信可否判定を`should_send_selection()`
+という純粋関数に切り出し、`tests/test_report_frequency.py`でモード×曜日×月初日の
+全パターンをユニットテスト化。実AWS環境でも`simulate_date`指定での動作を確認済み。
 
 ### 7. Function URL のリソースポリシーが広い
 

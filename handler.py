@@ -193,7 +193,24 @@ def run_monitoring_report():
     send_email("📊 本日の監視レポート", body)
 
 
+def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_report_day: str) -> bool:
+    """選定レポートを送るべきかを判定する純粋関数(テスト容易性のため副作用を持たせない)。
+    短期=毎日、中期=毎週指定曜日、長期=月初(1〜7日)の指定曜日のみ(月1回)。"""
+    is_report_weekday = weekday == weekly_report_day
+    return (
+        mode == "SHORT"
+        or (mode == "MID" and is_report_weekday)
+        or (mode == "LONG" and is_report_weekday and day_of_month <= 7)
+    )
+
+
 def _dispatch(event: dict) -> dict:
+    # TODO#7b: 例外捕捉→通知の経路を本番に影響を与えずテストするためのフック。
+    # 実データには一切触れず即座に例外を送出するだけなので、実AWS環境で安全に
+    # 障害通知の実地確認ができる(test-skip-reviewスキルでの検討結果を反映)。
+    if event.get("_test_trigger_failure"):
+        raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
+
     # 画面の「監視レポートを送る」ボタンから来た場合は監視のみ実行する
     if event.get("monitoring_only"):
         run_monitoring_report()
@@ -204,20 +221,15 @@ def _dispatch(event: dict) -> dict:
         run_selection_report()
         return {"statusCode": 200, "body": "OK"}
 
-    # EventBridge Schedulerからの定期実行
-    # 選定レポートの送信頻度はモードで変える: 短期=毎日、中期=毎週指定曜日、
-    # 長期=月初(1〜7日)の指定曜日のみ(月1回)
-    weekday = str(datetime.now(timezone.utc).weekday())
-    day_of_month = datetime.now(timezone.utc).day
+    # EventBridge Schedulerからの定期実行。TODO#7a: simulate_dateがあればそれを使い、
+    # 通常は実行時刻を使う(本番動作に影響を与えずテスト時だけ日付を差し替えられる)
+    simulate_date = event.get("simulate_date")
+    now = datetime.fromisoformat(simulate_date) if simulate_date else datetime.now(timezone.utc)
+    weekday = str(now.weekday())
+    day_of_month = now.day
     mode = get_period_mode()
 
-    is_report_weekday = weekday == IS_WEEKLY_REPORT_DAY
-    should_send_selection = (
-        mode == "SHORT"
-        or (mode == "MID" and is_report_weekday)
-        or (mode == "LONG" and is_report_weekday and day_of_month <= 7)
-    )
-    if should_send_selection:
+    if should_send_selection(mode, weekday, day_of_month, IS_WEEKLY_REPORT_DAY):
         run_selection_report()
     run_monitoring_report()
     return {"statusCode": 200, "body": "OK"}
