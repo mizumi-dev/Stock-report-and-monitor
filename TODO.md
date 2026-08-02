@@ -120,11 +120,23 @@ Yahoo Financeへの通信がネットワークポリシーでブロックされ�
 - [x] 段階3: TODO#7b対応。`_test_trigger_failure`イベントフラグを追加し、実AWS環境で
       障害通知経路(例外送出→CloudWatch記録→SES通知)を実地確認。ユニットテスト3件追加
       (合計34件全てpass)
-- [ ] 段階4: GitHub Actionsでpush時に自動実行するCI
+- [x] 段階4: `.github/workflows/tests.yml`でpush/PR時に自動実行するCIを追加。
+      クリーンな仮想環境で`requirements-dev.txt`のみをインストールした状態での
+      pytest実行をローカルで事前検証済み（34件全てpass）
+
+**TODO#4は4段階すべて完了。**
 
 対応案（元の記録）:
 - DynamoDB は 20行程度のインメモリfakeで代用できる（moto はこの環境では
   cryptography/pyo3 依存が壊れていて動かなかった）
+
+### 5a. 画面・エラーメッセージの文言が文書化されていない
+
+register-stockの画面文言・エラーメッセージはコード内(`_render_form`/`_render_info`等)
+にしかなく、一覧化された文書がない。`expert-panel-review`での検討結果、独立した
+「製品仕様書」を新設するほどではないが（`docs/requirements.md`が実質その役割を
+既に果たしている）、文言一覧はいずれ`docs/requirements.md`への軽い追記で対応する
+価値がある。優先度は低い。
 
 ### 5. 監視・ログの可視化がない
 
