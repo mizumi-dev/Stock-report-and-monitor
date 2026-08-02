@@ -61,8 +61,19 @@ register-stock(`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)に
   デプロイ。`SES_RECIPIENT`環境変数も追加反映済み(`LastUpdateStatus: Successful`)
 - **ブラウザでの実地確認完了（2026-08-02）**: `https://pegsignal.com/`・`?about=1`・
   `?contact=1`すべて問題なくアクセスでき、お問い合わせフォームからの送信メールも
-  `amsllr759@gmail.com`に正常着信することを確認。**利用者の不安解消バッチは完了。**
-  次はSES本番アクセスの再申請
+  `amsllr759@gmail.com`に正常着信することを確認。
+- **退会機能のバグを本番で発見・修正（2026-08-02）**: 実際に退会操作を行ったところ
+  内部サーバーエラーが発生。原因は`stock-report-register-role`に`approved_tokens`・
+  `app_settings`テーブルへの`DeleteItem`権限が付与されていなかったこと。
+  `watchlist`側は権限があったため監視リストの削除だけ成功し、`app_settings`の削除で
+  例外→処理中断となり、`approved_tokens`のトークン無効化まで到達しない不完全な状態に
+  なっていた(アクセス用リンクは有効なまま、監視リストだけ空という中途半端な状態。
+  「登録データを完全に保有しない状態にしたい」との要望を踏まえ、退会完了時に
+  メールアドレスを含むレコードが物理削除されメールアドレスが一切残らないことも確認)。
+  `iam:PutRolePolicy`を`stock-report-register-role`に限定して追加発行してもらい、
+  本番ロールに直接権限を追加して解消(`deploy.sh`の`register-policy`定義にも反映済み)。
+  詳細は`docs/architecture.md`4節※3を参照。ユーザーによる再検証待ち
+- **利用者の不安解消バッチは実装・デプロイ完了。** 次はSES本番アクセスの再申請
 - マルチテナント化（TODO#6a）は対応済み
 - **マネタイズ・国際展開方針を決定（2026-08-02）**: 決済機能は持たず、広告
   （非パーソナライズ・Web画面限定）またはアフィリエイトで検討。対象地域は
