@@ -12,11 +12,12 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
 「誰でも申し込める」形での外部公開を進めている。
 
 - **SES本番アクセス申請: 却下済み（2026-08-02判明）**。`aws sesv2 get-account`で確認したところ
-  `ProductionAccessEnabled: false`、`ReviewDetails.Status: DENIED`（CaseId: 177263262900237）。
-  「審査待ち」ではなく既に却下されていたことが判明。申請時の`WebsiteURL`が
-  `aws-mocha1-first-try.com`（過去の別サービス用の仮ドメイン）になっていたことが
-  却下理由と推測される。**対応中**: サービスにふさわしい新ドメイン`pegsignal.com`を
-  Route53で取得完了。プライバシーポリシー/利用規約への導線を含むサイトを用意済み。
+  `ProductionAccessEnabled: false`、`ReviewDetails.Status: DENIED`。当初`CaseId: 177263262900237`
+  (`WebsiteURL`が`aws-mocha1-first-try.com`という過去の別サービス用仮ドメイン)と記録していたが、
+  実際にAWS上で確認したところ直近の却下は`CaseId: 178564814600583`
+  (`WebsiteURL`がGitHubリポジトリのURL)で、記録と実態がずれていた。
+  **対応中**: サービスにふさわしい新ドメイン`pegsignal.com`をRoute53で取得完了。
+  プライバシーポリシー/利用規約への導線を含むサイトを用意済み。
   SES本番アクセスの再申請前に、運営者情報・問い合わせ先・登録解除手段などの
   信頼性強化(下記「利用者の不安解消」参照)を先に整える方針
 - **SESの送信元/宛先アドレスを個人Gmailから分離（2026-08-02）**: `pegsignal.com`を
@@ -87,7 +88,12 @@ register-stock(`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)に
   - プライバシーポリシー・利用規約は透明性を優先し折りたたみ化の対象外とした
   - テスト32件は文言変更後も全てpass(details内のテキストもDOM上に存在するため
     文字列アサーションへの影響なし)、AWSへデプロイ・CodeSha256一致確認済み
-- 次はSES本番アクセスの再申請
+- **SES本番アクセスの再申請 提出済み（2026-08-02）**: `aws sesv2 put-account-details`での
+  API経由の再申請は`ConflictException`で拒否される仕様(一度DENIEDになると
+  API経由では再申請できず、AWSサポートセンター経由が必要)と判明。ユーザーが
+  却下済みケース(CaseId: 178564814600583)への返信という形で、新ドメイン
+  `https://pegsignal.com/`・ダブルオプトイン方式・自己退会機能・前回却下理由の
+  解消状況を記載して再申請済み。**AWSからの回答待ち。**
 - マルチテナント化（TODO#6a）は対応済み
 - **マネタイズ・国際展開方針を決定（2026-08-02）**: 決済機能は持たず、広告
   （非パーソナライズ・Web画面限定）またはアフィリエイトで検討。対象地域は
