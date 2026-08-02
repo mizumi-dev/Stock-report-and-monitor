@@ -113,8 +113,12 @@ Yahoo Financeへの通信がネットワークポリシーでブロックされ�
       月初日の全パターン)をユニットテスト化。20件全てpass。副産物として
       `should_send_selection`を独立関数に切り出し、TODO#7a(日付注入)も
       `simulate_date`イベントフラグで解決（実AWS環境で動作確認済み）
-- [ ] 段階2: DynamoDBの軽量fakeを使ったコンポーネントテスト（認証・監視リスト上限・
-      ティッカー検証）
+- [x] 段階2: `tests/fake_dynamodb.py`にDynamoDBの軽量fakeを実装し、register-stock
+      (`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)のコンポーネント
+      テストを追加（認証、ティッカー登録・削除・重複・検証、監視リスト上限、
+      期間モード切替）。daily-batch側と同名の`handler.py`が別ディレクトリに存在する
+      問題は`importlib.util.spec_from_file_location`で別名ロードして回避。
+      合計31件全てpass
 - [ ] 段階3: TODO#7b（`_test_trigger_failure`相当のテストフック）
 - [ ] 段階4: GitHub Actionsでpush時に自動実行するCI
 
