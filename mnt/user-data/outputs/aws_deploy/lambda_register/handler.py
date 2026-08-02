@@ -114,6 +114,17 @@ table{border-collapse:collapse;width:100%;font-size:13px;}
 code{background:#eef0f4;padding:1px 5px;border-radius:4px;}
 label{display:block;margin-bottom:12px;}
 .site-footer{max-width:440px;margin:16px auto 0;text-align:center;}
+.steps{display:flex;gap:8px;margin:14px 0 18px;}
+.step{flex:1;text-align:center;}
+.step-num{display:flex;align-items:center;justify-content:center;width:26px;height:26px;
+  margin:0 auto 4px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+  font-size:13px;font-weight:700;}
+.step-label{font-size:11.5px;color:var(--ink-muted);}
+details{margin:10px 0;border:1px solid var(--border);border-radius:8px;padding:2px 12px;}
+details[open]{padding-bottom:10px;}
+summary{cursor:pointer;padding:8px 0;font-weight:600;font-size:14px;}
+summary::marker{color:var(--accent);}
+details p:last-child{margin-bottom:0;}
 """
 
 
@@ -250,20 +261,28 @@ def _render_signup_form(notice: str = "") -> str:
     return f"""
     {notice_html}
     <h1>PegSignal（株式レポートサービス）</h1>
-    <p class="muted">個人が開発・運営しているサービスです。運営者について詳しくは
-    <a href="?about=1">運営者情報</a>をご覧ください。</p>
-    <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
-    低く割安な成長株を選定し、無料でメール配信します。登録した銘柄については、
-    トレンド・モメンタム・出来高の3種類のシグナルを毎日監視して通知します。</p>
-    <p class="muted">
-    ※投資助言ではありません。判定はYahoo Financeが提供するデータに基づいており、
-    正確性・遅延について当サービスは保証しません。詳しくは
-    <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
+    <p>割安な成長株を毎日メールでお知らせする<strong>無料サービス</strong>です。
+    個人が開発・運営しています（<a href="?about=1">運営者情報</a>）。</p>
+
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-label">メール登録</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-label">銘柄を選ぶ</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-label">毎日レポート受信</div></div>
+    </div>
+
+    <details>
+      <summary>くわしい選定方法・注意事項</summary>
+      <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
+      低く割安な成長株を選定します。登録した銘柄については、トレンド・モメンタム・
+      出来高の3種類のシグナルを毎日監視して通知します。</p>
+      <p class="muted">※投資助言ではありません。判定はYahoo Financeが提供するデータに
+      基づいており、正確性・遅延について当サービスは保証しません。詳しくは
+      <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
+    </details>
 
     <h3>お申込み</h3>
-    <p>メールアドレスを入力すると、確認メールが届きます。リンクをクリックすると登録が完了します。
-    ご登録いただいたメールアドレスは<strong>レポート配信・ログイン用リンクの送信にのみ</strong>
-    使用し、第三者への提供は行いません。</p>
+    <p class="muted">ご登録いただいたメールアドレスは<strong>レポート配信・ログイン用
+    リンクの送信にのみ</strong>使用し、第三者への提供は行いません。</p>
     <form method="GET">
       <input name="signup_email" type="email" placeholder="example@example.com"
              style="width:100%;" required>
@@ -464,56 +483,44 @@ def _render_info(token: str) -> str:
 
     return f"""
     <h3>このサービスの仕組み</h3>
+    <p class="muted">🟢/⚪のランプはシグナルの点灯有無を表示しているだけで、複数条件を
+    合成したスコアではありません。投資助言ではなく、Yahoo Financeが提供する値に
+    依存しており正確性・遅延を保証しません。</p>
 
-    <h4>📈 選定レポート</h4>
-    <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）</p>
-    <p>次の条件を両方満たす銘柄だけを候補にします:</p>
-    <ul>
-      <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
-      <li>PEGレシオが 0 より大きく {MAX_PEG} 以下</li>
-    </ul>
-    <p>通過した銘柄をPEGの小さい順（同値なら時価総額の大きい順）に並べ、上位を送ります。</p>
-    <p>PEG・利益成長率・時価総額・株価は <strong>Yahoo Finance（yfinanceライブラリ）</strong> から取得しています。
-    PEGは「株価収益率(PER) ÷ 利益成長率」で、低いほど成長性に対して割安とされる指標です。
-    Yahoo Financeが算出した値をそのまま使っており、当サービスで再計算はしていません。</p>
-    <p>発行頻度はモードによって異なります（短期=毎日、中期=毎週月曜、長期=月初の月曜で月1回）。
-    詳しくは下表を参照してください。</p>
+    <details open>
+      <summary>📈 選定レポート — PEGレシオが低い割安な成長株を自動選定</summary>
+      <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）。次の条件を両方満たす
+      銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
+      <ul>
+        <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
+        <li>PEGレシオが 0 より大きく {MAX_PEG} 以下</li>
+      </ul>
+      <p class="muted">PEG・利益成長率・時価総額・株価は<strong>Yahoo Finance
+      （yfinanceライブラリ）</strong>から取得。PEGは「株価収益率(PER) ÷ 利益成長率」で、
+      低いほど成長性に対して割安とされる指標です。当サービスでの再計算はしていません。
+      発行頻度はモードによって異なります（短期=毎日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
+    </details>
 
-    <h4>📊 監視レポート（日次）</h4>
-    <p>登録した銘柄について、3種類のシグナルを判定します。監視レポートは全モード共通で毎日送ります。</p>
+    <details>
+      <summary>📊 監視レポート — 登録銘柄のトレンド・モメンタム・出来高を毎日判定</summary>
+      <p><strong>トレンド</strong>は次のどちらかが成立すると点灯します:
+      <strong>クロス</strong>（短い移動平均線が長い方を「その日に」上抜け／下抜け）、
+      または<strong>並び順</strong>（株価・各移動平均線が上から順にきれいに並んでいる状態）。
+      全モード共通で日足データを使って判定します。</p>
+      <p><strong>モメンタム</strong>はRSIで判定します。判定サイクル分（短期=当日、中期=前の週、
+      長期=前の月の実際の取引日）のRSI平均が、売られすぎの水準以下なら買い、買われすぎの
+      水準以上なら売りです。</p>
+      <p><strong>出来高</strong>は判定サイクル分の平均出来高が基準値の
+      {PERIOD_PRESETS[mode]['volume_multiplier']}倍を超えたら「急増」と表示する参考指標
+      （買い／売りの方向は持ちません）です。</p>
+    </details>
 
-    <p><strong>トレンド</strong>は次の2つのどちらかが成立すると点灯します:</p>
-    <ul>
-      <li><strong>クロス</strong>: 短い方の移動平均線が長い方を「その日に」上抜けた（買い）／下抜けた（売り）。
-      交差した瞬間だけ点灯します。</li>
-      <li><strong>並び順</strong>: 株価・各移動平均線が上から順にきれいに並んでいる状態。
-      トレンドが続く限り毎日点灯します。</li>
-    </ul>
-    <p>トレンドは全モード共通で日足データを使って判定します。</p>
-
-    <p><strong>モメンタム</strong>はRSIで判定します。判定サイクル分（短期=当日、中期=前の週、長期=前の月の
-    実際の取引日）のRSI平均が、売られすぎの水準以下なら買い、買われすぎの水準以上なら売りです
-    （閾値を跨いだ時点で対称に判定します）。中期・長期では、休場日があった週・月はその分を除いた
-    日数で平均します。</p>
-
-    <p><strong>出来高</strong>は判定サイクル分の平均出来高が、基準値の
-    {PERIOD_PRESETS[mode]['volume_multiplier']}倍を超えたら「急増」と表示します
-    （{PERIOD_PRESETS[mode]['volume_lookback']}日平均・{PERIOD_PRESETS[mode]['label']}モードの場合）。
-    中期・長期の基準値は、判定期間そのものは含めず、その直前の期間だけで計算します。
-    買い／売りの方向は持たない参考指標です。</p>
-
-    <h4>期間モードごとの設定値</h4>
-    {table}
-    <p style="color:#888;font-size:12px;">
-      短期は反応が早いぶん騙しも多く、長期は点灯頻度が下がります。
+    <details>
+      <summary>⚙️ 期間モードごとの設定値（現在: {PERIOD_PRESETS[mode]['label']}）</summary>
+      {table}
+      <p class="muted">短期は反応が早いぶん騙しも多く、長期は点灯頻度が下がります。
       シグナルが出ない期間が続くのは長期モードでは正常な状態です。</p>
-
-    <p style="color:#888;font-size:12px;">
-      🟢/⚪のランプは上記シグナルの点灯有無を表示しているだけで、複数条件を合成したスコアではありません。</p>
-
-    <p style="color:#888;font-size:12px;">
-      ※本サービスは投資助言ではありません。判定はYahoo Financeが提供する値に依存しており、
-      その正確性・遅延について当サービスは保証しません。</p>
+    </details>
 
     <p><a href="?token={t}">戻る</a></p>
     """
