@@ -6,11 +6,13 @@ import html
 import os
 import traceback
 import boto3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from config import (
     DEFAULT_PERIOD_MODE,
+    FETCH_MAX_WORKERS,
     MIN_FETCH_SUCCESS_RATIO,
     NASDAQ100_CACHE_KEY,
     PERIOD_MODE_KEY,
@@ -130,13 +132,19 @@ def run_selection_report():
     tickers = get_nasdaq100_tickers(fallback=cached)
     save_cached_tickers(tickers)
 
+    # I/O待ちが支配的な逐次取得がボトルネックのため並列化する。非公式APIへの
+    # 負荷を抑えるため全並列ではなくFETCH_MAX_WORKERSで頭打ちにする。
     stocks, signals_map = [], {}
-    for t in tickers:
-        d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
-        if d.get("history") is None:
-            continue
-        stocks.append(d)
-        signals_map[t] = calc_all_signals(d["history"], mode)
+    with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as executor:
+        fetched = executor.map(
+            lambda t: get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"]),
+            tickers,
+        )
+        for d in fetched:
+            if d.get("history") is None:
+                continue
+            stocks.append(d)
+            signals_map[d["ticker"]] = calc_all_signals(d["history"], mode)
 
     # 個別銘柄のたまたまの失敗ではなく外部API自体が落ちている可能性が高い場合は、
     # 中身がほぼ空のレポートを送らずエラー通知に切り替える(handler()のtry/exceptに乗せる)

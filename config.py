@@ -17,6 +17,9 @@ DEFAULT_TOP_N = 3
 # 外部APIそのものが落ちていると判断できる水準)
 MIN_FETCH_SUCCESS_RATIO = 0.5
 NASDAQ100_CACHE_KEY = "nasdaq100_tickers_cache"
+# 銘柄データ取得の並列数。非公式APIへの負荷・レート制限リスクを考慮し、
+# 全並列ではなくI/O待ち解消に十分な程度に抑える
+FETCH_MAX_WORKERS = 10
 
 # ===== トレンド判定の方式 =====
 # "MA"(移動平均線) または "MACD"。現在はMAのみ運用。
