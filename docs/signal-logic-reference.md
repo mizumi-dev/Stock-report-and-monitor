@@ -4,6 +4,8 @@
 更新すること。見やすいバージョン（表・図）はArtifactとしても公開:
 https://claude.ai/code/artifact/e6daf9db-9e45-4d6d-957d-0e5929be1f96
 
+サービス本体のURL（銘柄登録・期間モード変更）は`README.md`を参照。
+
 **実装済み・実AWS環境でのE2Eテスト完了（2026-08-02）。**
 
 ---
