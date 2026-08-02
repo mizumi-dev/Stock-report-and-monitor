@@ -166,7 +166,43 @@ def _render_signup_form(notice: str = "") -> str:
       <input type="hidden" name="captcha_n2" value="{n2}">
       <button type="submit" style="padding:8px 16px;">申し込む</button>
     </form>
+    <p style="color:#888;font-size:12px;">
+      お申込みは <a href="?terms=1">利用規約</a>・<a href="?privacy=1">プライバシーポリシー</a>
+      への同意とみなされます。本サービスは日本・米国在住の方向けです。
+      <strong>欧州経済領域(EEA)・英国・スイス在住の方はお申込みをご遠慮ください。</strong></p>
     <p style="color:#888;font-size:12px;">既に招待リンクをお持ちの場合は、そのリンクからアクセスしてください。</p>
+    """
+
+
+def _render_privacy() -> str:
+    return """
+    <h3>プライバシーポリシー</h3>
+    <p>収集する情報は<strong>メールアドレス・登録銘柄・判定期間モードの選択のみ</strong>です。
+    クレジットカード等の決済情報、氏名・住所、IPアドレスのログ、Cookieによる行動追跡は
+    一切行っていません。第三者への個人情報の提供・販売もありません。</p>
+    <p>将来、Webページ上に非パーソナライズ広告またはアフィリエイトリンクを掲載する
+    可能性がありますが、その場合も個人を特定・追跡する形での広告配信は行いません。</p>
+    <p>本サービスは日本国内・米国在住の方を対象としています。
+    <strong>欧州経済領域(EEA)・英国・スイス在住の方は対象外です。</strong></p>
+    <p>登録情報の削除・開示をご希望の場合は <code>mohatose4929@gmail.com</code> までご連絡ください。</p>
+    <p><a href="?">戻る</a></p>
+    """
+
+
+def _render_terms() -> str:
+    return """
+    <h3>利用規約</h3>
+    <p><strong>本サービスが配信するレポート・シグナルは投資助言ではありません。</strong>
+    情報はYahoo Finance等の外部データに基づいており、正確性・完全性を保証しません。
+    投資判断はご自身の責任で行ってください。</p>
+    <p>本サービスは日本国内・米国在住の方を対象とする無料サービスです。
+    <strong>欧州経済領域(EEA)・英国・スイス在住の方は対象外です。</strong></p>
+    <p>招待トークン(アクセスリンク)はご自身で管理してください。不正利用・過度な自動アクセス等が
+    判明した場合、事前の通知なくアカウントを停止することがあります。</p>
+    <p>本サービスは運営者の判断により、事前の通知なく機能変更・停止を行うことがあります。</p>
+    <p>詳細は <a href="?privacy=1">プライバシーポリシー</a> も参照してください。
+    お問い合わせ: <code>mohatose4929@gmail.com</code></p>
+    <p><a href="?">戻る</a></p>
     """
 
 
@@ -224,6 +260,8 @@ def _render_form(token: str, notice: str = "") -> str:
 
     <hr style="margin:24px 0;">
     <p><a href="?token={t}&info=1">この仕組みについて（判定ロジック・データ元）</a></p>
+    <p style="color:#888;font-size:12px;">
+      <a href="?terms=1">利用規約</a> ・ <a href="?privacy=1">プライバシーポリシー</a></p>
     """
 
 
@@ -384,6 +422,12 @@ def handler(event, context):
 
     if params.get("signup_email"):
         return _handle_signup(params)
+
+    if params.get("privacy"):
+        return _page(_render_privacy())
+
+    if params.get("terms"):
+        return _page(_render_terms())
 
     if not _is_valid_token(token):
         return _page(_render_signup_form(), status=403 if token else 200)

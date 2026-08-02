@@ -60,6 +60,16 @@ class TestAuth:
         assert r["statusCode"] == 403
         assert "お申込み" in r["body"]
 
+    def test_privacy_page_accessible_without_token(self, rh):
+        r = rh.handler(_event(privacy="1"), None)
+        assert r["statusCode"] == 200
+        assert "プライバシーポリシー" in r["body"]
+
+    def test_terms_page_accessible_without_token(self, rh):
+        r = rh.handler(_event(terms="1"), None)
+        assert r["statusCode"] == 200
+        assert "利用規約" in r["body"]
+
     def test_pending_token_is_not_yet_valid(self, rh):
         rh.dynamodb.Table("approved_tokens").put_item(
             Item={"token": "pending-tok", "email": "p@example.com", "status": "pending"})
