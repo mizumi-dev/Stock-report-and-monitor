@@ -125,6 +125,19 @@ details[open]{padding-bottom:10px;}
 summary{cursor:pointer;padding:8px 0;font-weight:600;font-size:14px;}
 summary::marker{color:var(--accent);}
 details p:last-child{margin-bottom:0;}
+.eyebrow{font-size:12px;letter-spacing:.03em;color:var(--ink-muted);margin:0 0 2px;}
+.trust-line{font-size:13px;color:var(--ink-muted);margin:0 0 14px;}
+.sample-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;margin:0 0 16px;}
+.sample-label{font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--ink-muted);margin-bottom:8px;}
+.sample-row{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:5px 0;}
+.ticker{font-family:ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;font-weight:700;}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:2px 9px;border-radius:100px;
+  font-size:12px;font-weight:600;white-space:nowrap;}
+.pill.buy{background:#dcfce7;color:#166534;}
+.pill.neutral{background:var(--border);color:var(--ink-muted);}
 """
 
 
@@ -260,9 +273,23 @@ def _render_signup_form(notice: str = "") -> str:
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
     return f"""
     {notice_html}
-    <h1>PegSignal（株式レポートサービス）</h1>
-    <p>割安な成長株を毎日メールでお知らせする<strong>無料サービス</strong>です。
-    個人が開発・運営しています（<a href="?about=1">運営者情報</a>）。</p>
+    <p class="eyebrow">PegSignal（無料・個人開発）</p>
+    <h1>NASDAQ100の割安な成長株を、毎朝メールでチェック</h1>
+    <p class="trust-line">🔒 メールはレポート配信にのみ使用・スパムなし・
+    <a href="?about=1">いつでも1クリックで完全削除</a>できます。</p>
+
+    <div class="sample-card">
+      <div class="sample-label">配信メールのサンプル</div>
+      <div class="sample-row">
+        <span class="ticker">NVDA</span>
+        <span class="pill buy">🟢 買いシグナル点灯</span>
+      </div>
+      <div class="sample-row">
+        <span class="ticker">AVGO</span>
+        <span class="pill neutral">⚪ シグナルなし</span>
+      </div>
+      <p class="muted" style="margin:8px 0 0;">※イメージです。内容は日々の相場で変動します。</p>
+    </div>
 
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-label">メール登録</div></div>
@@ -282,7 +309,8 @@ def _render_signup_form(notice: str = "") -> str:
 
     <h3>お申込み</h3>
     <p class="muted">ご登録いただいたメールアドレスは<strong>レポート配信・ログイン用
-    リンクの送信にのみ</strong>使用し、第三者への提供は行いません。</p>
+    リンクの送信にのみ</strong>使用し、第三者への提供は行いません。個人が開発・運営して
+    います（<a href="?about=1">運営者情報</a>）。</p>
     <form method="GET">
       <input name="signup_email" type="email" placeholder="example@example.com"
              style="width:100%;" required>
