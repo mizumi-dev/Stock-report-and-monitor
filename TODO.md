@@ -210,15 +210,25 @@ TODO#4段階1で対応。`event.get("simulate_date")`があればそれを使い
 という純粋関数に切り出し、`tests/test_report_frequency.py`でモード×曜日×月初日の
 全パターンをユニットテスト化。実AWS環境でも`simulate_date`指定での動作を確認済み。
 
-### 7. Function URL のリソースポリシーが広い
+### 7. Function URL のリソースポリシーが広い — 調査済み、IAMでは解決不可（2026-08-02）
 
 `public-url-invoke-function` の許可が無条件の `Principal: *` になっており、
-「Function URL経由に限る」という条件が付いていない（CLI の `add-permission` では
-`lambda:InvokedViaFunctionUrl` 条件を付けられないため）。
+「Function URL経由に限る」という条件が付いていない。
 
-トークンを知らなければ登録も削除もできないので即座に危険ではないが、
-コンソールから URL を作り直せば AWS が適切な条件付きポリシーを自動生成する。
-その場合 URL が変わるので `REGISTER_FUNCTION_URL` の更新が必要。
+**実地検証の結果**: `add-permission`に`--function-url-auth-type NONE`を
+`lambda:InvokeFunction`アクションへ付けようとしたところ、
+`InvalidParameterValueException: FunctionUrlAuthType is only supported for
+lambda:InvokeFunctionUrl action`で拒否された。これはCLIの制限ではなく**AWSのAPI
+自体の制限**で、`lambda:InvokeFunction`アクションにはこの条件を一切付けられない
+（コンソールでURLを作り直しても同じ制限に当たる可能性が高く、「コンソールなら直る」
+という当初の想定は誤りだった可能性がある）。
+
+**リスク再評価**（`expert-panel-review`での検討結果）: この権限が意味するのは
+「AWSアカウントを持つ第三者がURLを経由せず直接Lambdaをinvokeできる」ことだが、
+呼び出しても実行されるコードは同じであり、`_is_valid_token`によるトークン検証は
+アプリケーション層で無条件に行われる。実害は「同時実行数(上限2)を他人に消費される」
+程度の妨害行為に留まり、認証バイパスにはならない。IAMポリシーでの根本対応は
+できないため、優先度を下げて記録に留める。
 
 ---
 
