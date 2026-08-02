@@ -59,8 +59,10 @@ register-stock(`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)に
 - 実AWS環境へのコードデプロイ完了（2026-08-02）: `register-stock`の
   `lambda:UpdateFunctionCode`権限を追加発行してもらい、`CodeSha256`一致を確認の上で
   デプロイ。`SES_RECIPIENT`環境変数も追加反映済み(`LastUpdateStatus: Successful`)
-- **未実施**: ブラウザでの実地確認（`https://pegsignal.com/`・`?about=1`・`?contact=1`・
-  退会リンクの動作確認を依頼中）
+- **ブラウザでの実地確認完了（2026-08-02）**: `https://pegsignal.com/`・`?about=1`・
+  `?contact=1`すべて問題なくアクセスでき、お問い合わせフォームからの送信メールも
+  `amsllr759@gmail.com`に正常着信することを確認。**利用者の不安解消バッチは完了。**
+  次はSES本番アクセスの再申請
 - マルチテナント化（TODO#6a）は対応済み
 - **マネタイズ・国際展開方針を決定（2026-08-02）**: 決済機能は持たず、広告
   （非パーソナライズ・Web画面限定）またはアフィリエイトで検討。対象地域は
