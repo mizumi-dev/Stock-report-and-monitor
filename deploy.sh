@@ -64,7 +64,7 @@ cat > /tmp/lambda-trust-policy.json << 'EOF'
 }
 EOF
 
-aws iam create-role --role-name lambda-daily-batch-role \
+aws iam create-role --role-name stock-report-batch-role \
   --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/batch-policy.json << EOF
@@ -85,10 +85,10 @@ cat > /tmp/batch-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name lambda-daily-batch-role \
+aws iam put-role-policy --role-name stock-report-batch-role \
   --policy-name batch-policy --policy-document file:///tmp/batch-policy.json
 
-aws iam create-role --role-name lambda-register-stock-role \
+aws iam create-role --role-name stock-report-register-role \
   --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/register-policy.json << EOF
@@ -108,7 +108,7 @@ cat > /tmp/register-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name lambda-register-stock-role \
+aws iam put-role-policy --role-name stock-report-register-role \
   --policy-name register-policy --policy-document file:///tmp/register-policy.json
 
 # EventBridge Scheduler がdaily-batchを起動するためのロール(信頼先はscheduler)
@@ -161,7 +161,7 @@ zip daily_batch.zip $DAILY_BATCH_FILES > /dev/null
 aws lambda create-function \
   --function-name daily-batch \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-daily-batch-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-batch-role" \
   --handler handler.handler \
   --zip-file fileb://daily_batch.zip \
   --timeout 900 --memory-size 512 \
@@ -179,7 +179,7 @@ zip -j register.zip config.py > /dev/null
 aws lambda create-function \
   --function-name register-stock \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-register-stock-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-register-role" \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
