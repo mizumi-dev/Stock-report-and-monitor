@@ -40,16 +40,14 @@ CloudWatchのErrorsメトリクスには引き続き記録される（通知が�
 リスクとのトレードオフ。`test-skip-review`スキルでのレビュー結果は下記7bを参照）。
 デプロイ済み（`daily-batch`、CodeSha256確認済み）。
 
-### 7b. 本番で「例外捕捉→通知」経路を安全に検証する仕組みがない
+### 7b. 本番で「例外捕捉→通知」経路を安全に検証する仕組みがない — 対応済み（2026-08-02）
 
-TODO#1のエラー通知実装で、`_notify_failure`が実際にSES送信まで動くかを本番環境で
-確認する安全な手段が現状ない（コードを一時的に壊して戻す以外の方法がない）。
-`test-skip-review`スキルでのレビュー結果: 今回は`send_email`自体が同日中に別経路で
-実地確認済みのため許容してスキップしたが、恒久的な穴として記録する。
-
-対応案: TODO#7a（日付の外部注入）と同じ発想で、`event.get("_test_trigger_failure")`の
-ような形でテスト時だけ意図的に例外を起こせるフックを設ける。TODO#4（自動テスト整備）
-着手時にまとめて対応するのが効率的。
+TODO#4段階3で対応。`event.get("_test_trigger_failure")`があれば実データに一切触れず
+即座に例外を送出するフックを追加。実AWS環境で2回invokeし、両方とも
+`FunctionError: Unhandled`（CloudWatchのErrorsメトリクスに記録される）で終了し、
+かつ`--log-type Tail`のログに通知メール送信失敗の警告が出ていないことから、
+`_notify_failure`のSES送信が実際に成功していることを確認済み。
+`tests/test_error_notification.py`でユニットテストも追加（3件、モック経由）。
 
 ### 2. 外部API障害に対する耐性がない — 対応済み（2026-08-02）
 
@@ -119,7 +117,9 @@ Yahoo Financeへの通信がネットワークポリシーでブロックされ�
       期間モード切替）。daily-batch側と同名の`handler.py`が別ディレクトリに存在する
       問題は`importlib.util.spec_from_file_location`で別名ロードして回避。
       合計31件全てpass
-- [ ] 段階3: TODO#7b（`_test_trigger_failure`相当のテストフック）
+- [x] 段階3: TODO#7b対応。`_test_trigger_failure`イベントフラグを追加し、実AWS環境で
+      障害通知経路(例外送出→CloudWatch記録→SES通知)を実地確認。ユニットテスト3件追加
+      (合計34件全てpass)
 - [ ] 段階4: GitHub Actionsでpush時に自動実行するCI
 
 対応案（元の記録）:

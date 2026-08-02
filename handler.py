@@ -205,6 +205,12 @@ def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_rep
 
 
 def _dispatch(event: dict) -> dict:
+    # TODO#7b: 例外捕捉→通知の経路を本番に影響を与えずテストするためのフック。
+    # 実データには一切触れず即座に例外を送出するだけなので、実AWS環境で安全に
+    # 障害通知の実地確認ができる(test-skip-reviewスキルでの検討結果を反映)。
+    if event.get("_test_trigger_failure"):
+        raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
+
     # 画面の「監視レポートを送る」ボタンから来た場合は監視のみ実行する
     if event.get("monitoring_only"):
         run_monitoring_report()
