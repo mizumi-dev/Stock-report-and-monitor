@@ -9,6 +9,7 @@ import importlib.util
 import json
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -268,6 +269,49 @@ class TestAccountDeletion:
         r = rh.handler(_event(token="bogus", delete_account_confirm="1"), None)
         assert r["statusCode"] == 403
         assert "お申込み" in r["body"]
+
+
+class TestReportCooldown:
+    def test_first_request_is_accepted(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        assert r["statusCode"] == 200
+        assert "受け付けました" in r["body"]
+        assert rh.lambda_client.invoke.called
+
+    def test_immediate_repeat_request_is_rejected(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        rh.lambda_client.invoke.reset_mock()
+
+        r = rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        assert r["statusCode"] == 429
+        assert "連続でのレポート送信リクエストはできません" in r["body"]
+        assert not rh.lambda_client.invoke.called
+
+    def test_request_after_cooldown_elapsed_is_accepted(self, rh):
+        old_time = datetime.now(timezone.utc) - timedelta(
+            seconds=rh.REPORT_REQUEST_COOLDOWN_SECONDS + 5)
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": f"{VALID_TOKEN}#last_report_request", "value": old_time.isoformat()})
+
+        r = rh.handler(_event(token=VALID_TOKEN, report="monitoring"), None)
+        assert r["statusCode"] == 200
+        assert "受け付けました" in r["body"]
+        assert rh.lambda_client.invoke.called
+
+    def test_cooldown_is_isolated_per_user(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
+        rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+
+        r = rh.handler(_event(token="other-tok", report="selection"), None)
+        assert r["statusCode"] == 200
+        assert "受け付けました" in r["body"]
+
+    def test_cooldown_record_removed_on_account_deletion(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        rh.handler(_event(token=VALID_TOKEN, delete_account_confirm="1"), None)
+        assert "Item" not in rh.dynamodb.Table("app_settings").get_item(
+            Key={"key": f"{VALID_TOKEN}#last_report_request"})
 
 
 class TestPeriodMode:

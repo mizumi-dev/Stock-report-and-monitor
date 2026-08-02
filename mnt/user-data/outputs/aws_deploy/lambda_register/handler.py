@@ -268,6 +268,34 @@ def _trigger_report(report: str, owner_token: str):
     )
 
 
+# 「今すぐ送信」ボタンの連打・マクロ連続実行でdaily-batch(実際の株価取得・メール送信を
+# 行う重い処理)を高頻度に起動されるのを防ぐためのクールダウン。利用者ごと(owner_token)に
+# 直近のリクエスト時刻をapp_settingsへ記録し、一定時間内の再リクエストは拒否する
+REPORT_REQUEST_COOLDOWN_SECONDS = 300
+
+
+def _report_cooldown_remaining(owner_token: str) -> int:
+    """クールダウン中なら残り秒数、そうでなければ0を返す。
+    設定の読み取りに失敗した場合は安全側(画面は出す)に倒し0を返す"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": f"{owner_token}#last_report_request"})
+        last = resp.get("Item", {}).get("value")
+        if not last:
+            return 0
+        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+        return max(0, int(REPORT_REQUEST_COOLDOWN_SECONDS - elapsed))
+    except Exception as e:
+        print(f"[WARN] レポート送信クールダウンの確認に失敗: {e}")
+        return 0
+
+
+def _record_report_request(owner_token: str):
+    table = dynamodb.Table(SETTINGS_TABLE)
+    table.put_item(Item={"key": f"{owner_token}#last_report_request",
+                         "value": datetime.now(timezone.utc).isoformat()})
+
+
 def _render_signup_form(notice: str = "") -> str:
     n1, n2 = random.randint(1, 9), random.randint(1, 9)
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
@@ -665,7 +693,9 @@ def _handle_delete_account(token: str) -> dict:
     watchlist_table = dynamodb.Table(WATCHLIST_TABLE)
     for ticker in _current_watchlist(token):
         watchlist_table.delete_item(Key={"owner_token": token, "ticker": ticker})
-    dynamodb.Table(SETTINGS_TABLE).delete_item(Key={"key": user_period_mode_key(token)})
+    settings_table = dynamodb.Table(SETTINGS_TABLE)
+    settings_table.delete_item(Key={"key": user_period_mode_key(token)})
+    settings_table.delete_item(Key={"key": f"{token}#last_report_request"})
     dynamodb.Table(APPROVED_TOKENS_TABLE).delete_item(Key={"token": token})
     return _page(
         "<h3>退会が完了しました</h3>"
@@ -739,10 +769,18 @@ def handler(event, context):
     report = (params.get("report") or "").strip().lower()
     if report in ("selection", "monitoring"):
         label = "選定" if report == "selection" else "監視"
+        wait = _report_cooldown_remaining(token)
+        if wait > 0:
+            return _page(
+                _render_form(token, notice=f"連続でのレポート送信リクエストはできません。"
+                                           f"あと{wait}秒お待ちください。"),
+                status=429,
+            )
         try:
             _trigger_report(report, token)
         except Exception as e:
             return _page(f"<p>{label}レポートの送信に失敗しました: {html.escape(str(e))}</p>{_back_link(token)}", status=500)
+        _record_report_request(token)
         return _page(_render_form(token, notice=f"{label}レポートの送信を受け付けました。まもなくメールが届きます。"))
 
     ticker = (params.get("ticker") or "").strip().upper()
