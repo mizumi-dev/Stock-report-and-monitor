@@ -36,16 +36,22 @@ fi
 echo "Zone ID: $ZONE_ID"
 
 echo "=== 3. ACM証明書をリクエスト(DNS検証、us-east-1固定) ==="
-CERT_ARN=$(aws acm request-certificate \
-  --domain-name "$DOMAIN" \
-  --subject-alternative-names "www.$DOMAIN" \
-  --validation-method DNS \
-  --region "$CERT_REGION" \
-  --query CertificateArn --output text)
-echo "Certificate ARN: $CERT_ARN"
-
-echo "検証用DNSレコード情報の反映を待機中..."
-sleep 15
+# 再実行時に重複した証明書を発行しないよう、既存の証明書があれば再利用する
+CERT_ARN=$(aws acm list-certificates --region "$CERT_REGION" \
+  --query "CertificateSummaryList[?DomainName=='$DOMAIN'].CertificateArn | [0]" --output text)
+if [ -z "$CERT_ARN" ] || [ "$CERT_ARN" = "None" ]; then
+  CERT_ARN=$(aws acm request-certificate \
+    --domain-name "$DOMAIN" \
+    --subject-alternative-names "www.$DOMAIN" \
+    --validation-method DNS \
+    --region "$CERT_REGION" \
+    --query CertificateArn --output text)
+  echo "Certificate ARN(新規): $CERT_ARN"
+  echo "検証用DNSレコード情報の反映を待機中..."
+  sleep 15
+else
+  echo "Certificate ARN(既存を再利用): $CERT_ARN"
+fi
 
 echo "=== 4. 検証用CNAMEレコードをRoute53に投入 ==="
 CHANGE_BATCH=$(aws acm describe-certificate --certificate-arn "$CERT_ARN" \
@@ -70,10 +76,21 @@ aws acm wait certificate-validated --certificate-arn "$CERT_ARN" --region "$CERT
 echo "証明書の検証が完了しました。"
 
 echo "=== 6. CloudFrontディストリビューションを作成 ==="
-# CachingDisabled + AllViewerExceptHostHeader (AWS管理ポリシー):
-# このアプリは全操作がクエリパラメータ(?token=...等)経由でステートフルなため、
-# キャッシュせずクエリ文字列・ヘッダをそのままoriginへ転送する必要がある
-DIST_CONFIG=$(python3 -c "
+# 再実行時に重複したディストリビューションを作らないよう、$DOMAIN を
+# Aliasに持つ既存のディストリビューションがあれば再利用する
+EXISTING_DIST_ID=$(aws cloudfront list-distributions \
+  --query "DistributionList.Items[?contains(Aliases.Items, '$DOMAIN')].Id | [0]" --output text)
+if [ -n "$EXISTING_DIST_ID" ] && [ "$EXISTING_DIST_ID" != "None" ]; then
+  DIST_ID="$EXISTING_DIST_ID"
+  DIST_DOMAIN=$(aws cloudfront get-distribution --id "$DIST_ID" \
+    --query "Distribution.DomainName" --output text)
+  echo "Distribution ID(既存を再利用): $DIST_ID"
+  echo "Distribution Domain: $DIST_DOMAIN"
+else
+  # CachingDisabled + AllViewerExceptHostHeader (AWS管理ポリシー):
+  # このアプリは全操作がクエリパラメータ(?token=...等)経由でステートフルなため、
+  # キャッシュせずクエリ文字列・ヘッダをそのままoriginへ転送する必要がある
+  DIST_CONFIG=$(python3 -c "
 import json
 config = {
     'CallerReference': 'pegsignal-$(date +%s)',
@@ -112,11 +129,12 @@ config = {
 }
 print(json.dumps(config))
 ")
-DIST_JSON=$(aws cloudfront create-distribution --distribution-config "$DIST_CONFIG")
-DIST_ID=$(echo "$DIST_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Distribution']['Id'])")
-DIST_DOMAIN=$(echo "$DIST_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Distribution']['DomainName'])")
-echo "Distribution ID: $DIST_ID"
-echo "Distribution Domain: $DIST_DOMAIN"
+  DIST_JSON=$(aws cloudfront create-distribution --distribution-config "$DIST_CONFIG")
+  DIST_ID=$(echo "$DIST_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Distribution']['Id'])")
+  DIST_DOMAIN=$(echo "$DIST_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['Distribution']['DomainName'])")
+  echo "Distribution ID(新規): $DIST_ID"
+  echo "Distribution Domain: $DIST_DOMAIN"
+fi
 
 echo "=== 7. pegsignal.com / www.pegsignal.com をCloudFrontへのALIASレコードに設定 ==="
 # CloudFrontのALIASターゲットのホストゾーンIDは固定値(Z2FDTNDATAQYW2)
