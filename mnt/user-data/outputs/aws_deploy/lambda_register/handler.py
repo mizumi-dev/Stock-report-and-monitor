@@ -11,6 +11,7 @@ watchlistは(owner_token, ticker)の複合キー、期間モードはapp_setting
 
 例: https://xxxx.lambda-url.us-east-1.on.aws/?token=xxxx&ticker=NVDA
 """
+import base64
 import html
 import json
 import os
@@ -58,14 +59,50 @@ def _response(body: str, status=200):
     }
 
 
+# PWA用アイコン(SVG)。外部ファイルを持たず、Lambda単体で完結させるためdata URIで埋め込む
+_ICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">'
+    '<rect width="192" height="192" rx="32" fill="#0f172a"/>'
+    '<polyline points="32,140 76,96 108,124 160,56" fill="none" stroke="#22c55e" '
+    'stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>'
+    '<circle cx="160" cy="56" r="12" fill="#22c55e"/></svg>'
+)
+_ICON_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(_ICON_SVG.encode()).decode()
+
+
 def _page(inner_html: str, status=200):
     return _response(
-        f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+        f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <meta name="theme-color" content="#0f172a">
+        <link rel="manifest" href="?manifest=1">
+        <link rel="apple-touch-icon" href="{_ICON_DATA_URI}">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+        <meta name="apple-mobile-web-app-title" content="株式レポート"></head>
         <body style="font-family:sans-serif;max-width:420px;margin:40px auto;padding:0 12px;">
         {inner_html}
         </body></html>""",
         status=status,
     )
+
+
+def _handle_manifest() -> dict:
+    """Web App Manifest。start_urlは意図的に省略し、
+    インストール元ページ(招待トークン付きURL)がそのまま起動先になるようにする"""
+    manifest = {
+        "name": "株式レポートサービス",
+        "short_name": "株式レポート",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#0f172a",
+        "icons": [
+            {"src": _ICON_DATA_URI, "sizes": "any", "type": "image/svg+xml", "purpose": "any"},
+        ],
+    }
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/manifest+json; charset=utf-8"},
+        "body": json.dumps(manifest, ensure_ascii=False),
+    }
 
 
 def _back_link(token: str) -> str:
@@ -422,6 +459,9 @@ def handler(event, context):
 
     if params.get("signup_email"):
         return _handle_signup(params)
+
+    if params.get("manifest"):
+        return _handle_manifest()
 
     if params.get("privacy"):
         return _page(_render_privacy())

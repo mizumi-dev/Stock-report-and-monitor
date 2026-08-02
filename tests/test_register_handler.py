@@ -6,6 +6,7 @@ daily-batch側にも同名の"handler.py"があるため、モジュール名衝
 importlib.util.spec_from_file_locationで明示的な別名("register_handler")としてロードする。
 """
 import importlib.util
+import json
 import re
 import sys
 from pathlib import Path
@@ -69,6 +70,14 @@ class TestAuth:
         r = rh.handler(_event(terms="1"), None)
         assert r["statusCode"] == 200
         assert "利用規約" in r["body"]
+
+    def test_manifest_accessible_without_token(self, rh):
+        r = rh.handler(_event(manifest="1"), None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "application/manifest+json; charset=utf-8"
+        body = json.loads(r["body"])
+        assert body["display"] == "standalone"
+        assert body["icons"][0]["src"].startswith("data:image/svg+xml;base64,")
 
     def test_pending_token_is_not_yet_valid(self, rh):
         rh.dynamodb.Table("approved_tokens").put_item(

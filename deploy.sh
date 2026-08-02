@@ -164,7 +164,7 @@ aws lambda create-function \
   --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-daily-batch-role" \
   --handler handler.handler \
   --zip-file fileb://daily_batch.zip \
-  --timeout 300 --memory-size 512 \
+  --timeout 900 --memory-size 512 \
   --layers "$LAYER_ARN" \
   --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=3}" \
   --region $AWS_REGION || \
@@ -226,8 +226,13 @@ REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock
 echo "登録用URL: $REGISTER_URL"
 
 echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを反映 ==="
+# --timeoutも合わせて指定: create-function側の変更は既にデプロイ済みの関数には
+# 反映されない(create-functionは既存時にupdate-function-codeにフォールバックし
+# コードしか更新しない)ため、再デプロイ時にここで確実にタイムアウトを揃える
+# (TODO#8 S&P500導入前の事前準備、900秒はLambdaの上限)
 aws lambda update-function-configuration \
   --function-name daily-batch \
+  --timeout 900 \
   --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=3}" \
   --region $AWS_REGION
 
