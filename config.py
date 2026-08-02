@@ -87,6 +87,13 @@ DEFAULT_PERIOD_MODE = "MID"
 SETTINGS_TABLE_DEFAULT = "app_settings"
 PERIOD_MODE_KEY = "period_mode"
 
+# ===== マルチテナント =====
+# 利用者の識別は招待トークンそのものを流用する(別途user_idを発行しない)。
+# approved_tokensのstatus: "pending"=メール確認待ち、"approved"=利用可能
+TOKEN_STATUS_PENDING = "pending"
+TOKEN_STATUS_APPROVED = "approved"
+WATCHLIST_MAX_PER_USER_DEFAULT = 5
+
 
 def get_preset(mode: str | None) -> dict:
     """モード名からプリセットを返す。未知の値は既定モードにフォールバックする"""
@@ -96,3 +103,17 @@ def get_preset(mode: str | None) -> dict:
 def normalize_mode(mode: str | None) -> str:
     m = (mode or "").upper()
     return m if m in PERIOD_PRESETS else DEFAULT_PERIOD_MODE
+
+
+def user_period_mode_key(owner_token: str) -> str:
+    """app_settingsテーブルで利用者ごとの期間モードを保存する際のキー。
+    利用者ごとに分離しつつ、テーブルの主キー構成(keyのみ)を変えずに済む
+    (文字列に利用者を埋め込むだけなのでテーブル作り直し不要)。"""
+    return f"{owner_token}#{PERIOD_MODE_KEY}"
+
+
+def signal_history_date_key(date_str: str, mode: str) -> str:
+    """signal_historyのdate(RANGE key)に期間モードも埋め込む。
+    RSI/トレンドはモードで値が変わるため、モードごとに別キャッシュにする必要がある
+    (ただし利用者ごとではなく、モードが同じ利用者同士で共有できる)。"""
+    return f"{date_str}#{normalize_mode(mode)}"

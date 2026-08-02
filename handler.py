@@ -1,11 +1,17 @@
 """
 daily-batch Lambda ハンドラ
 毎日1回、EventBridge Schedulerから起動される想定
+
+マルチテナント方針: 利用者の識別は招待トークンそのものを使う(別途user_idは発行しない)。
+approved_tokensのstatus="approved"の利用者全員に、各自のwatchlist・期間モードに応じた
+レポートを個別に送る。選定レポートはNASDAQ100全体のスキャンが重いため、利用者ごとではなく
+「使われているモードごと」に1回だけスキャンし、そのモードの利用者全員に配る。
 """
 import html
 import os
 import traceback
 import boto3
+from boto3.dynamodb.conditions import Key
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -17,8 +23,11 @@ from config import (
     NASDAQ100_CACHE_KEY,
     PERIOD_MODE_KEY,
     SETTINGS_TABLE_DEFAULT,
+    TOKEN_STATUS_APPROVED,
     get_preset,
     normalize_mode,
+    signal_history_date_key,
+    user_period_mode_key,
 )
 from data_sources import get_nasdaq100_tickers, get_stock_data
 from signals import calc_all_signals
@@ -28,10 +37,10 @@ from report import build_selection_report, build_monitoring_report
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 SIGNAL_HISTORY_TABLE = os.environ.get("SIGNAL_HISTORY_TABLE", "signal_history")
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
+APPROVED_TOKENS_TABLE = os.environ.get("APPROVED_TOKENS_TABLE", "approved_tokens")
 SES_SENDER = os.environ["SES_SENDER"]
-SES_RECIPIENT = os.environ["SES_RECIPIENT"]
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL") or os.environ.get("SES_RECIPIENT", "")
 REGISTER_URL = os.environ["REGISTER_FUNCTION_URL"]
-REGISTER_TOKEN = os.environ["REGISTER_TOKEN"]  # メール内リンクに付与する招待トークン
 IS_WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_WEEKDAY", "0")  # 0=月曜
 TOP_N = int(os.environ.get("TOP_N", "3"))
 
@@ -47,12 +56,23 @@ def _yesterday_str():
     return (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
 
 
-def get_period_mode() -> str:
+def get_approved_users() -> list[dict]:
+    """status=approvedの利用者一覧({"token":..., "email":...})を返す"""
+    table = dynamodb.Table(APPROVED_TOKENS_TABLE)
+    resp = table.scan()
+    return [
+        {"token": item["token"], "email": item["email"]}
+        for item in resp.get("Items", [])
+        if item.get("status") == TOKEN_STATUS_APPROVED
+    ]
+
+
+def get_user_period_mode(owner_token: str) -> str:
     """利用者が画面で選んだ期間モードを読む。未設定・取得失敗時は既定モードで動かす
     (設定が読めないだけでレポート全体を止める必要はないため)。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": PERIOD_MODE_KEY})
+        resp = table.get_item(Key={"key": user_period_mode_key(owner_token)})
         return normalize_mode(resp.get("Item", {}).get("value"))
     except Exception as e:
         print(f"[WARN] 期間モードの取得に失敗、既定値({DEFAULT_PERIOD_MODE})を使用: {e}")
@@ -60,7 +80,8 @@ def get_period_mode() -> str:
 
 
 def get_cached_tickers() -> list[str] | None:
-    """前回成功時に保存したNASDAQ100構成銘柄リスト。Nasdaq API障害時のフォールバック用。"""
+    """前回成功時に保存したNASDAQ100構成銘柄リスト。Nasdaq API障害時のフォールバック用。
+    利用者に依存しない共有データなのでキーはそのまま。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
         resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
@@ -84,15 +105,17 @@ def save_cached_tickers(tickers: list[str]):
         print(f"[WARN] 銘柄キャッシュの保存に失敗: {e}")
 
 
-def get_watchlist() -> list[str]:
+def get_user_watchlist(owner_token: str) -> list[str]:
     table = dynamodb.Table(WATCHLIST_TABLE)
-    resp = table.scan()
+    resp = table.query(KeyConditionExpression=Key("owner_token").eq(owner_token))
     return [item["ticker"] for item in resp.get("Items", [])]
 
 
-def get_prev_signals(ticker: str) -> dict | None:
+def get_prev_signals(ticker: str, mode: str) -> dict | None:
+    """モードが同じ利用者同士で共有するキャッシュ(利用者ごとではない)。
+    RSI/トレンドはモードで値が変わるため、モードもキーに含める。"""
     table = dynamodb.Table(SIGNAL_HISTORY_TABLE)
-    resp = table.get_item(Key={"ticker": ticker, "date": _yesterday_str()})
+    resp = table.get_item(Key={"ticker": ticker, "date": signal_history_date_key(_yesterday_str(), mode)})
     return resp.get("Item", {}).get("signals")
 
 
@@ -107,15 +130,19 @@ def _to_dynamodb_safe(value):
     return value
 
 
-def save_signals(ticker: str, signals: dict):
+def save_signals(ticker: str, mode: str, signals: dict):
     table = dynamodb.Table(SIGNAL_HISTORY_TABLE)
-    table.put_item(Item={"ticker": ticker, "date": _today_str(), "signals": _to_dynamodb_safe(signals)})
+    table.put_item(Item={
+        "ticker": ticker,
+        "date": signal_history_date_key(_today_str(), mode),
+        "signals": _to_dynamodb_safe(signals),
+    })
 
 
-def send_email(subject: str, html_body: str):
+def send_email(subject: str, html_body: str, to_address: str):
     ses.send_email(
         Source=SES_SENDER,
-        Destination={"ToAddresses": [SES_RECIPIENT]},
+        Destination={"ToAddresses": [to_address]},
         Message={
             "Subject": {"Data": subject, "Charset": "UTF-8"},
             "Body": {"Html": {"Data": html_body, "Charset": "UTF-8"}},
@@ -123,9 +150,9 @@ def send_email(subject: str, html_body: str):
     )
 
 
-def run_selection_report():
-    """週次: NASDAQ100全銘柄をスキャンしてランキング上位N件のレポートを送る"""
-    mode = get_period_mode()
+def _scan_universe(mode: str) -> tuple[list, dict]:
+    """NASDAQ100全銘柄をスキャンし、ランキングと全銘柄分のシグナルを返す。
+    利用者ごとではなく、同じモードを使う利用者全員で使い回す(スキャンが重いため)。"""
     preset = get_preset(mode)
 
     cached = get_cached_tickers()
@@ -156,41 +183,56 @@ def run_selection_report():
         )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
-    body = build_selection_report(ranked, signals_map, REGISTER_URL, REGISTER_TOKEN, preset["label"])
-    send_email("📈 今週の買い時レポート", body)
+    return ranked, signals_map
 
 
-def run_monitoring_report():
-    """日次: 登録銘柄のみ監視してレポートを送る"""
-    watchlist = get_watchlist()
-    if not watchlist:
-        print("[INFO] 監視リストが空のため監視レポートはスキップ")
-        return
+def run_selection_reports(users: list[dict]):
+    """usersに含まれる利用者全員へ選定レポートを送る。モードごとに1回だけスキャンする。"""
+    by_mode: dict[str, list[dict]] = {}
+    for u in users:
+        mode = get_user_period_mode(u["token"])
+        by_mode.setdefault(mode, []).append(u)
 
-    mode = get_period_mode()
-    preset = get_preset(mode)
-    results, skipped = [], []
-    for t in watchlist:
-        d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
-        if d.get("history") is None:
-            # 上場間もない等でデータが足りない銘柄。黙って消すと利用者が混乱するため
-            # レポートに理由付きで載せる
-            skipped.append(t)
+    for mode, group in by_mode.items():
+        preset = get_preset(mode)
+        ranked, signals_map = _scan_universe(mode)
+        for u in group:
+            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], preset["label"])
+            send_email("📈 今週の買い時レポート", body, u["email"])
+
+
+def run_monitoring_reports(users: list[dict]):
+    """usersに含まれる利用者全員へ、それぞれの監視リストに基づくレポートを送る。
+    watchlistが空の利用者はスキップする。"""
+    for u in users:
+        watchlist = get_user_watchlist(u["token"])
+        if not watchlist:
             continue
-        sig = calc_all_signals(d["history"], mode)
-        prev_sig = get_prev_signals(t)
-        results.append({
-            "ticker": t,
-            "price": d["current_price"],
-            "prev_close": d["prev_close"],
-            "signals": sig,
-            "prev_signals": prev_sig,
-            "peg": d.get("peg"),
-        })
-        save_signals(t, sig)
 
-    body = build_monitoring_report(results, preset["label"], skipped)
-    send_email("📊 本日の監視レポート", body)
+        mode = get_user_period_mode(u["token"])
+        preset = get_preset(mode)
+        results, skipped = [], []
+        for t in watchlist:
+            d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
+            if d.get("history") is None:
+                # 上場間もない等でデータが足りない銘柄。黙って消すと利用者が混乱するため
+                # レポートに理由付きで載せる
+                skipped.append(t)
+                continue
+            sig = calc_all_signals(d["history"], mode)
+            prev_sig = get_prev_signals(t, mode)
+            results.append({
+                "ticker": t,
+                "price": d["current_price"],
+                "prev_close": d["prev_close"],
+                "signals": sig,
+                "prev_signals": prev_sig,
+                "peg": d.get("peg"),
+            })
+            save_signals(t, mode, sig)
+
+        body = build_monitoring_report(results, preset["label"], skipped)
+        send_email("📊 本日の監視レポート", body, u["email"])
 
 
 def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_report_day: str) -> bool:
@@ -211,14 +253,18 @@ def _dispatch(event: dict) -> dict:
     if event.get("_test_trigger_failure"):
         raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
 
-    # 画面の「監視レポートを送る」ボタンから来た場合は監視のみ実行する
+    owner_token = event.get("owner_token")
+
+    # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ送る
     if event.get("monitoring_only"):
-        run_monitoring_report()
+        users = [u for u in get_approved_users() if u["token"] == owner_token] if owner_token else get_approved_users()
+        run_monitoring_reports(users)
         return {"statusCode": 200, "body": "OK"}
 
     # 画面の「選定レポートを送る」ボタン、またはテスト用に選定のみ実行する
     if event.get("force_weekly"):
-        run_selection_report()
+        users = [u for u in get_approved_users() if u["token"] == owner_token] if owner_token else get_approved_users()
+        run_selection_reports(users)
         return {"statusCode": 200, "body": "OK"}
 
     # EventBridge Schedulerからの定期実行。TODO#7a: simulate_dateがあればそれを使い、
@@ -227,17 +273,19 @@ def _dispatch(event: dict) -> dict:
     now = datetime.fromisoformat(simulate_date) if simulate_date else datetime.now(timezone.utc)
     weekday = str(now.weekday())
     day_of_month = now.day
-    mode = get_period_mode()
 
-    if should_send_selection(mode, weekday, day_of_month, IS_WEEKLY_REPORT_DAY):
-        run_selection_report()
-    run_monitoring_report()
+    users = get_approved_users()
+    selection_targets = [u for u in users if should_send_selection(
+        get_user_period_mode(u["token"]), weekday, day_of_month, IS_WEEKLY_REPORT_DAY)]
+    if selection_targets:
+        run_selection_reports(selection_targets)
+    run_monitoring_reports(users)
     return {"statusCode": 200, "body": "OK"}
 
 
 def _notify_failure(event: dict, exc: Exception):
-    """失敗をメールで知らせる。通知自体が失敗しても呼び出し元の例外送出は止めない
-    (元の例外を握りつぶすと、CloudWatchのErrorsメトリクスに記録されず
+    """失敗を運用者(あなた)にメールで知らせる。通知自体が失敗しても呼び出し元の例外送出は
+    止めない(元の例外を握りつぶすと、CloudWatchのErrorsメトリクスに記録されず
     無人実行が黙って失敗し続けるという、対応しようとしている問題そのものを再発させるため)。"""
     try:
         body = (
@@ -245,7 +293,7 @@ def _notify_failure(event: dict, exc: Exception):
             f"<p>event: {html.escape(str(event))}</p>"
             f"<pre>{html.escape(traceback.format_exc())}</pre>"
         )
-        send_email("🚨 daily-batchが失敗しました", body)
+        send_email("🚨 daily-batchが失敗しました", body, ADMIN_EMAIL)
     except Exception as notify_exc:
         print(f"[ERROR] 失敗通知メールの送信にも失敗しました: {notify_exc}")
 

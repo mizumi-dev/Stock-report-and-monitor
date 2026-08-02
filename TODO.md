@@ -2,6 +2,23 @@
 
 最終更新: 2026-08-02
 
+## 外部公開に向けた進行中の作業（2026-08-02）
+
+「誰でも申し込める」形での外部公開を進めている。
+
+- **SES本番アクセス申請: 審査待ち**。`aws sesv2 put-account-details`で申請済みだが
+  `ProductionAccessEnabled`はまだ`false`（AWSの審査は数時間〜数日かかる）。
+  承認されるまでは、他人（未検証のメールアドレス）にレポートを送れない
+  （サンドボックス上限: 24時間で200通、1通/秒）。定期的に
+  `aws sesv2 get-account`で確認すること
+- マルチテナント化（TODO#6a）は対応済み
+- **マネタイズ・国際展開方針を決定（2026-08-02）**: 決済機能は持たず、広告
+  （非パーソナライズ・Web画面限定）またはアフィリエイトで検討。対象地域は
+  日本・米国とし、GDPR対応負荷を避けるため欧州(EEA)・英国・スイスは対象外と明記。
+  `docs/privacy-policy.md`・`docs/terms-of-service.md`を新設し、register-stock画面
+  （申込みフォーム・メイン画面）に導線を追加済み
+- 残り: TODO#7（Function URLポリシー）、乱用・コスト対策の強化、UI/CSS装飾（多言語化と同時に実施予定）
+
 ## mainマージ前の最終確認（2026-08-02）
 
 `expert-panel-review`での検討結果、TODO#1〜#3(対応試行含む)までの内容でマージ可能と判断
@@ -154,12 +171,42 @@ register-stockの画面文言・エラーメッセージはコード内(`_render
 ダッシュボードは今回作らなかった（TODO.md備考: 追加で$3/月かかるため、必要になったら
 別途検討）。
 
-### 6. 招待トークンの管理が手作業
+### 6. 招待トークンの管理が手作業 — 対応済み（2026-08-02、方針転換）
 
-複数人に配る場合、招待・失効の操作が AWS CLI からの DynamoDB 直接操作しかない。
-「あとで複数人になる」という想定と噛み合っていない。
+「外部公開」の方針（誰でも申し込める、人数上限は決めていない）を受けて、当初想定していた
+「管理者が手動承認するUI」ではなく、**ダブルオプトイン方式のセルフサーブ登録**を実装した
+（`expert-panel-review`での検討結果、管理者の手を煩わせない一般的な方式として採用）。
 
-対応案: 管理者用トークンを1つ設け、画面から招待トークンの発行・失効ができるようにする
+- `register-stock`に`?signup_email=...`での申込み受付を追加。簡易CAPTCHA(計算問題)付き
+- 確認メール内のリンク(`?token=...&confirm=1`)をクリックすると
+  `approved_tokens`の`status`が`pending`→`approved`に自動昇格
+- 管理者(あなた)の関与は一切不要
+
+### 6a. マルチテナント化（利用者ごとのデータ分離） — 対応済み（2026-08-02）
+
+TODO#6のセルフサーブ化に伴い、サービス全体が「1人専用」の設計だったことが判明
+（`watchlist`・期間モードが全利用者で共有されていた）。以下を実装:
+
+- `watchlist`テーブルを`owner_token`(HASH)+`ticker`(RANGE)の複合キーに作り直し
+  （既存データはNVDA/AAPLの2件のみだったため手動移行）
+- 期間モードを`app_settings`に`"{token}#period_mode"`という利用者ごとのキーで保存
+- `signal_history`は利用者ごとではなく「期間モードごと」に共有（キーに`#MODE`を付与）
+  し、同じモードの利用者間で計算結果を使い回すことでコストを抑制
+- `daily-batch`の選定レポート送信は、利用者ごとではなく**使われているモードごとに
+  1回だけNASDAQ100をスキャン**し、そのモードの利用者全員に個別リンクで配信する方式に変更
+- 監視レポートは利用者ごとに自分のwatchlist・モードで個別集計・個別送信
+- IAM権限を両ロールに追加(`dynamodb:Query`on watchlist、`approved_tokens`への
+  GetItem/Scan/PutItem、register-stock-roleへの`ses:SendEmail`)
+- ユニットテスト14件追加（他人の登録に影響しないこと、モードごとのスキャン共有、
+  利用者ごとの個別送信など）、実AWS環境で2利用者による分離動作を確認済み
+- `deploy.sh`に新スキーマ・新IAM権限を反映済み
+
+**副次的に発覚したドリフト**: `deploy.sh`が想定するIAMロール名(`lambda-daily-batch-role`
+等)と実際のデプロイ済みロール名(`stock-report-batch-role`等)が異なっていた。実害はないが
+`deploy.sh`側のロール名を実態に合わせて修正すべき（詳細は`docs/architecture.md`5節）。
+
+**未対応（次点）**: IPごとのレート制限、選定レポートがモード別スキャンになったことによる
+実行コスト増（最大でモード数倍、現状3モードなので最大3倍）の実測確認。
 
 ### 7a. handler()の日付をテスト時に注入できない — 対応済み（2026-08-02）
 
@@ -168,15 +215,25 @@ TODO#4段階1で対応。`event.get("simulate_date")`があればそれを使い
 という純粋関数に切り出し、`tests/test_report_frequency.py`でモード×曜日×月初日の
 全パターンをユニットテスト化。実AWS環境でも`simulate_date`指定での動作を確認済み。
 
-### 7. Function URL のリソースポリシーが広い
+### 7. Function URL のリソースポリシーが広い — 調査済み、IAMでは解決不可（2026-08-02）
 
 `public-url-invoke-function` の許可が無条件の `Principal: *` になっており、
-「Function URL経由に限る」という条件が付いていない（CLI の `add-permission` では
-`lambda:InvokedViaFunctionUrl` 条件を付けられないため）。
+「Function URL経由に限る」という条件が付いていない。
 
-トークンを知らなければ登録も削除もできないので即座に危険ではないが、
-コンソールから URL を作り直せば AWS が適切な条件付きポリシーを自動生成する。
-その場合 URL が変わるので `REGISTER_FUNCTION_URL` の更新が必要。
+**実地検証の結果**: `add-permission`に`--function-url-auth-type NONE`を
+`lambda:InvokeFunction`アクションへ付けようとしたところ、
+`InvalidParameterValueException: FunctionUrlAuthType is only supported for
+lambda:InvokeFunctionUrl action`で拒否された。これはCLIの制限ではなく**AWSのAPI
+自体の制限**で、`lambda:InvokeFunction`アクションにはこの条件を一切付けられない
+（コンソールでURLを作り直しても同じ制限に当たる可能性が高く、「コンソールなら直る」
+という当初の想定は誤りだった可能性がある）。
+
+**リスク再評価**（`expert-panel-review`での検討結果）: この権限が意味するのは
+「AWSアカウントを持つ第三者がURLを経由せず直接Lambdaをinvokeできる」ことだが、
+呼び出しても実行されるコードは同じであり、`_is_valid_token`によるトークン検証は
+アプリケーション層で無条件に行われる。実害は「同時実行数(上限2)を他人に消費される」
+程度の妨害行為に留まり、認証バイパスにはならない。IAMポリシーでの根本対応は
+できないため、優先度を下げて記録に留める。
 
 ---
 
