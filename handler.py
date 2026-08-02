@@ -158,8 +158,19 @@ def handler(event, context):
         return {"statusCode": 200, "body": "OK"}
 
     # EventBridge Schedulerからの定期実行
+    # 選定レポートの送信頻度はモードで変える: 短期=毎日、中期=毎週指定曜日、
+    # 長期=月初(1〜7日)の指定曜日のみ(月1回)
     weekday = str(datetime.now(timezone.utc).weekday())
-    if weekday == IS_WEEKLY_REPORT_DAY:
+    day_of_month = datetime.now(timezone.utc).day
+    mode = get_period_mode()
+
+    is_report_weekday = weekday == IS_WEEKLY_REPORT_DAY
+    should_send_selection = (
+        mode == "SHORT"
+        or (mode == "MID" and is_report_weekday)
+        or (mode == "LONG" and is_report_weekday and day_of_month <= 7)
+    )
+    if should_send_selection:
         run_selection_report()
     run_monitoring_report()
     return {"statusCode": 200, "body": "OK"}

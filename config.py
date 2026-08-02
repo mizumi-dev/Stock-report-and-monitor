@@ -18,7 +18,8 @@ MA_OR_MACD = "MA"
 # ===== 期間モードのプリセット =====
 # ma_short/ma_long: クロス判定に使う2本の移動平均
 # ma_filter: 並び順(パーフェクトオーダー)判定に追加する長期線。Noneなら使わない
-# rsi_recovery: 「この値以下から上昇に転じたら買い」の判定ライン
+# cycle_unit: RSI/出来高の判定サイクル。"day"=当日、"week"=前の暦週、"month"=前の暦月
+#   (週/月は実際にあった取引日だけを平均する。休場日があれば自然に減る)
 # history_period: yfinanceに渡す取得期間
 # min_rows: この行数未満の銘柄は計算対象外(長い移動平均がNaNになるため)
 PERIOD_PRESETS = {
@@ -32,9 +33,9 @@ PERIOD_PRESETS = {
         "rsi_period": 9,
         "rsi_oversold": 25,
         "rsi_overbought": 75,
-        "rsi_recovery": 40,
         "volume_lookback": 20,
         "volume_multiplier": 1.5,
+        "cycle_unit": "day",
         "history_period": "6mo",
         "min_rows": 60,
     },
@@ -48,9 +49,9 @@ PERIOD_PRESETS = {
         "rsi_period": 14,
         "rsi_oversold": 30,
         "rsi_overbought": 70,
-        "rsi_recovery": 40,
         "volume_lookback": 20,
         "volume_multiplier": 1.5,
+        "cycle_unit": "week",
         "history_period": "2y",
         "min_rows": 201,
     },
@@ -64,9 +65,9 @@ PERIOD_PRESETS = {
         "rsi_period": 21,
         "rsi_oversold": 30,
         "rsi_overbought": 70,
-        "rsi_recovery": 35,
         "volume_lookback": 50,
         "volume_multiplier": 1.5,
+        "cycle_unit": "month",
         "history_period": "2y",
         "min_rows": 201,
     },
