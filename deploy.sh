@@ -15,8 +15,8 @@ set -euo pipefail
 
 # ---- 事前に書き換えてください ----
 export AWS_REGION="us-east-1"
-export SES_SENDER="mohatose4929@gmail.com"      # SESで検証済みにするメールアドレス
-export SES_RECIPIENT="mohatose4929@gmail.com"   # レポート送付先(サンドボックスなら要検証)
+export SES_SENDER="noreply@pegsignal.com"       # pegsignal.comをSESでドメイン認証済み(TXT+DKIM)
+export SES_RECIPIENT="amsllr759@gmail.com"      # 事業用アドレス。レポート送付先(サンドボックスなら要検証)
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
@@ -64,7 +64,7 @@ cat > /tmp/lambda-trust-policy.json << 'EOF'
 }
 EOF
 
-aws iam create-role --role-name lambda-daily-batch-role \
+aws iam create-role --role-name stock-report-batch-role \
   --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/batch-policy.json << EOF
@@ -85,10 +85,10 @@ cat > /tmp/batch-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name lambda-daily-batch-role \
+aws iam put-role-policy --role-name stock-report-batch-role \
   --policy-name batch-policy --policy-document file:///tmp/batch-policy.json
 
-aws iam create-role --role-name lambda-register-stock-role \
+aws iam create-role --role-name stock-report-register-role \
   --assume-role-policy-document file:///tmp/lambda-trust-policy.json || echo "(既に存在する場合はスキップ)"
 
 cat > /tmp/register-policy.json << EOF
@@ -97,9 +97,9 @@ cat > /tmp/register-policy.json << EOF
   "Statement": [
     {"Effect": "Allow", "Action": ["dynamodb:PutItem","dynamodb:DeleteItem","dynamodb:Scan","dynamodb:Query"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/watchlist"},
-    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:Scan"],
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem","dynamodb:Scan"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/approved_tokens"},
-    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem"],
+    {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:PutItem","dynamodb:DeleteItem"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
     {"Effect": "Allow", "Action": ["lambda:InvokeFunction"],
      "Resource": "arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch"},
@@ -108,7 +108,7 @@ cat > /tmp/register-policy.json << EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name lambda-register-stock-role \
+aws iam put-role-policy --role-name stock-report-register-role \
   --policy-name register-policy --policy-document file:///tmp/register-policy.json
 
 # EventBridge Scheduler がdaily-batchを起動するためのロール(信頼先はscheduler)
@@ -161,12 +161,12 @@ zip daily_batch.zip $DAILY_BATCH_FILES > /dev/null
 aws lambda create-function \
   --function-name daily-batch \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-daily-batch-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-batch-role" \
   --handler handler.handler \
   --zip-file fileb://daily_batch.zip \
-  --timeout 300 --memory-size 512 \
+  --timeout 900 --memory-size 512 \
   --layers "$LAYER_ARN" \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=3}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
     --zip-file fileb://daily_batch.zip --region $AWS_REGION
@@ -179,11 +179,11 @@ zip -j register.zip config.py > /dev/null
 aws lambda create-function \
   --function-name register-stock \
   --runtime python3.12 \
-  --role "arn:aws:iam::$ACCOUNT_ID:role/lambda-register-stock-role" \
+  --role "arn:aws:iam::$ACCOUNT_ID:role/stock-report-register-role" \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
@@ -226,15 +226,20 @@ REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock
 echo "登録用URL: $REGISTER_URL"
 
 echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを反映 ==="
+# --timeoutも合わせて指定: create-function側の変更は既にデプロイ済みの関数には
+# 反映されない(create-functionは既存時にupdate-function-codeにフォールバックし
+# コードしか更新しない)ため、再デプロイ時にここで確実にタイムアウトを揃える
+# (TODO#8 S&P500導入前の事前準備、900秒はLambdaの上限)
 aws lambda update-function-configuration \
   --function-name daily-batch \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=3}" \
+  --timeout 900 \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
   --region $AWS_REGION
 
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
 aws lambda update-function-configuration \
   --function-name register-stock \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
   --region $AWS_REGION
 
 echo "=== 9. EventBridge Scheduler 設定(毎日 米東部17時=UTC22時 平日) ==="

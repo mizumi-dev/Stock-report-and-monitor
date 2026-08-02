@@ -51,8 +51,8 @@ register-stock Lambda (Function URL, 認証なしURL+招待トークン)
 ### daily-batch
 - ソース: `handler.py` `config.py` `signals.py` `data_sources.py` `ranking.py` `report.py`
 - トリガー: EventBridge Scheduler（定期実行）、または`register-stock`からの非同期invoke
-- IAMロール: 実際のデプロイ先は`stock-report-batch-role`（`deploy.sh`記載の
-  `lambda-daily-batch-role`とは名前が異なる。既知のドリフト、下記5.参照）
+- IAMロール: `stock-report-batch-role`（2026-08-02、`deploy.sh`側の記載を実際の
+  ロール名に合わせて修正済み。旧ドリフトの経緯は下記5.参照）
 - 環境変数: `SES_SENDER` `SES_RECIPIENT`(エラー通知の送付先=`ADMIN_EMAIL`として流用)
   `REGISTER_FUNCTION_URL` `WEEKLY_REPORT_WEEKDAY`(既定"0") `TOP_N`(既定3)
   `WATCHLIST_TABLE` `SIGNAL_HISTORY_TABLE` `SETTINGS_TABLE` `APPROVED_TOKENS_TABLE`
@@ -66,8 +66,8 @@ register-stock Lambda (Function URL, 認証なしURL+招待トークン)
 ### register-stock
 - ソース: `mnt/user-data/outputs/aws_deploy/lambda_register/handler.py` `config.py`
 - トリガー: Function URL（`AuthType: NONE`、招待トークンはアプリ層で検証）
-- IAMロール: 実際のデプロイ先は`stock-report-register-role`（`deploy.sh`記載の
-  `lambda-register-stock-role`とは名前が異なる。既知のドリフト、下記5.参照）
+- IAMロール: `stock-report-register-role`（2026-08-02、`deploy.sh`側の記載を実際の
+  ロール名に合わせて修正済み。旧ドリフトの経緯は下記5.参照）
 - 環境変数: `WATCHLIST_TABLE` `APPROVED_TOKENS_TABLE` `SETTINGS_TABLE`
   `MAX_WATCHLIST_SIZE`(既定5) `DAILY_BATCH_FUNCTION`(既定"daily-batch")
   `SES_SENDER`(申込み確認メールの送信元) `REGISTER_FUNCTION_URL`(確認メールの
@@ -110,8 +110,8 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 | | `approved_tokens` | **GetItem, Scan**(※2) |
 | | SES | SendEmail |
 | `stock-report-register-role`(register-stock) | `watchlist` | PutItem, DeleteItem, Scan, **Query**(※2) |
-| | `approved_tokens` | GetItem, **PutItem, Scan**(※2) |
-| | `app_settings` | GetItem, PutItem |
+| | `approved_tokens` | GetItem, PutItem, Scan, **DeleteItem**(※3) |
+| | `app_settings` | GetItem, PutItem, **DeleteItem**(※3) |
 | | `daily-batch`関数 | InvokeFunction |
 | | SES | **SendEmail**(※2、申込み確認メール用) |
 | `scheduler-invoke-batch-role` | `daily-batch`関数 | InvokeFunction |
@@ -120,6 +120,14 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 | | `watchlist`/`approved_tokens`/`app_settings`/`signal_history` | DeleteTable, CreateTable, UpdateItem, Query(マルチテナント化のテーブル移行作業用) |
 
 ※2: マルチテナント化(2026-08-02)で追加。`deploy.sh`にも反映済み。
+
+※3: 自己退会機能(2026-08-02)追加時に権限付与が漏れており、実際に退会操作を行った
+利用者で本番エラー(500)が発生して発覚。`watchlist`にはDeleteItemがあったため
+監視リストの削除だけ成功し、`app_settings`の削除でエラー→処理中断となり、
+`approved_tokens`の削除まで到達せずアクセス用トークンが無効化されない状態になった
+（データはこの状態で壊れてはいないが、退会自体は未完了だった）。
+`iam:PutRolePolicy`を`stock-report-register-role`に限定して追加発行してもらい、
+本番ロールに直接反映して解消。`deploy.sh`にも反映済み。
 
 ※1: TODO#2（NASDAQ100銘柄キャッシュ）の実装時、`daily-batch`ロールに`app_settings`への
 `PutItem`権限が不足していることが本番の403エラーで判明し、`aws iam put-role-policy`で
@@ -132,15 +140,17 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 - このセッションで使えるAWS認証情報(`claude-deploy`)は`iam:ListRolePolicies`等の読み取り
   権限を持たないため、実際にデプロイ済みのIAMポリシー内容を直接読み出して検証すること
   はできない。上表は「`deploy.sh`に書かれているべき内容」であり、実際のロールとの
-  完全な一致は`deploy.sh`を再実行するか、コンソール等の別経路での確認が必要。
+  完全な一致は`deploy.sh`を再実行するか、コンソール等の別経路での確認が必要
+  （ロール名(`Role`属性)自体は`lambda:GetFunctionConfiguration`権限があれば別途確認可能で、
+  2026-08-02にこの権限で確認しIAMロール名のドリフトを修正した。ポリシー内容までは未確認）。
 - Function URLのリソースポリシー（`Principal: *`が広い件）は`TODO.md`#7を参照。
-- **IAMロール名のドリフト**: `deploy.sh`は`lambda-daily-batch-role`/
-  `lambda-register-stock-role`という名前を使っているが、実際にデプロイされている
-  ロールは`stock-report-batch-role`/`stock-report-register-role`という別名。
-  マルチテナント化のIAM権限追加作業で発覚（実際のロール名は
-  `aws lambda get-function-configuration --query Role`で確認した）。恐らく初回
-  デプロイ時に手動で名前を変えたか、`deploy.sh`とは別の手順で作られたと見られる。
-  実害はない（正しいロールに権限を追加できている）が、`deploy.sh`をそのまま
-  再実行した場合に旧ロール名で新規ロールが作られ、実際に使われているロールに
-  権限が反映されない可能性がある。次に`deploy.sh`を触る際に`deploy.sh`側の
-  ロール名を実際の名前に合わせて修正すべき。
+- **IAMロール名のドリフト — 対応済み（2026-08-02）**: `deploy.sh`は当初
+  `lambda-daily-batch-role`/`lambda-register-stock-role`という名前を使っていたが、
+  実際にデプロイされているロールは`stock-report-batch-role`/
+  `stock-report-register-role`という別名だった（マルチテナント化のIAM権限追加作業で発覚、
+  `aws lambda get-function-configuration --query Role`で確認）。恐らく初回デプロイ時に
+  手動で名前を変えたか、`deploy.sh`とは別の手順で作られたと見られる。実害はなかった
+  （正しいロールに権限を追加できていた）が、`deploy.sh`をそのまま再実行した場合に
+  旧ロール名で新規ロールが作られ、実際に使われているロールに権限が反映されないリスクが
+  あったため、`deploy.sh`側のロール名を実際の名前(`stock-report-batch-role`/
+  `stock-report-register-role`)に合わせて修正した。

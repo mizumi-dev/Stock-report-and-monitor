@@ -39,7 +39,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
               <p style="margin:4px 0;"><strong>【第{i}位】{s['ticker']} — {s.get('company_name','')}</strong></p>
               <p style="margin:4px 0;">PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%</p>
               <p style="margin:4px 0;">シグナル: {lamps}</p>
-              <p style="margin:4px 0;"><a href="{register_form_url}&ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
+              <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
             </div>
             """)
         body_rows = f"<p>🔎 サマリー<br>{summary}</p>" + "".join(cards)
