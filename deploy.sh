@@ -15,8 +15,8 @@ set -euo pipefail
 
 # ---- 事前に書き換えてください ----
 export AWS_REGION="us-east-1"
-export SES_SENDER="mohatose4929@gmail.com"      # SESで検証済みにするメールアドレス
-export SES_RECIPIENT="mohatose4929@gmail.com"   # レポート送付先(サンドボックスなら要検証)
+export SES_SENDER="noreply@pegsignal.com"       # pegsignal.comをSESでドメイン認証済み(TXT+DKIM)
+export SES_RECIPIENT="amsllr759@gmail.com"      # 事業用アドレス。レポート送付先(サンドボックスなら要検証)
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
