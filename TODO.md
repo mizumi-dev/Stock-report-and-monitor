@@ -72,8 +72,9 @@ register-stock(`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)に
   メールアドレスを含むレコードが物理削除されメールアドレスが一切残らないことも確認)。
   `iam:PutRolePolicy`を`stock-report-register-role`に限定して追加発行してもらい、
   本番ロールに直接権限を追加して解消(`deploy.sh`の`register-policy`定義にも反映済み)。
-  詳細は`docs/architecture.md`4節※3を参照。ユーザーによる再検証待ち
-- **利用者の不安解消バッチは実装・デプロイ完了。** 次はSES本番アクセスの再申請
+  詳細は`docs/architecture.md`4節※3を参照。**ユーザーが実際に退会操作を再実行し、
+  正常動作を確認済み（2026-08-02）。**
+- **利用者の不安解消バッチは実装・デプロイ・実地確認まで完了。** 次はSES本番アクセスの再申請
 - マルチテナント化（TODO#6a）は対応済み
 - **マネタイズ・国際展開方針を決定（2026-08-02）**: 決済機能は持たず、広告
   （非パーソナライズ・Web画面限定）またはアフィリエイトで検討。対象地域は
