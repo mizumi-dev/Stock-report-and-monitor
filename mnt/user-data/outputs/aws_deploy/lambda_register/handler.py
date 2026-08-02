@@ -2,26 +2,35 @@
 register-stock Lambda ハンドラ
 Function URL(認証なし)で直接呼ばれる想定。招待トークン(?token=)を持つ人のみ操作可能。
 
-この1つのURLに、銘柄の登録/削除・期間モードの切替・レポートの即時送信・
-仕組みの説明ページをすべて集約している(画面が分かれていると迷うため)。
+この1つのURLに、申込み(ダブルオプトイン)・銘柄の登録/削除・期間モードの切替・
+レポートの即時送信・仕組みの説明ページをすべて集約している(画面が分かれていると迷うため)。
+
+マルチテナント方針: 利用者の識別は招待トークンそのものを使う(別途user_idは発行しない)。
+watchlistは(owner_token, ticker)の複合キー、期間モードはapp_settingsに
+"{token}#period_mode"というキーで保存し、利用者ごとに分離する。
 
 例: https://xxxx.lambda-url.us-east-1.on.aws/?token=xxxx&ticker=NVDA
 """
 import html
 import json
 import os
+import random
 import re
+import secrets
 import boto3
+from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 
 from config import (
     MAX_PEG,
     MIN_GROWTH,
-    PERIOD_MODE_KEY,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
+    TOKEN_STATUS_APPROVED,
+    TOKEN_STATUS_PENDING,
     get_preset,
     normalize_mode,
+    user_period_mode_key,
 )
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
@@ -29,12 +38,16 @@ APPROVED_TOKENS_TABLE = os.environ.get("APPROVED_TOKENS_TABLE", "approved_tokens
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
 MAX_WATCHLIST_SIZE = int(os.environ.get("MAX_WATCHLIST_SIZE", "5"))
 DAILY_BATCH_FUNCTION = os.environ.get("DAILY_BATCH_FUNCTION", "daily-batch")
+SES_SENDER = os.environ.get("SES_SENDER", "")
+REGISTER_FUNCTION_URL = os.environ.get("REGISTER_FUNCTION_URL", "")
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
+ses = boto3.client("ses")
 
 # ASCII英大文字・数字のみ1〜6文字。isalnum()は全角文字等も通すため正規表現で制限する
 TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _response(body: str, status=200):
@@ -59,44 +72,78 @@ def _back_link(token: str) -> str:
     return f'<p><a href="?token={html.escape(token)}">戻る</a></p>'
 
 
-def _is_valid_token(token: str) -> bool:
+def _get_token_item(token: str) -> dict | None:
     if not token:
-        return False
+        return None
     table = dynamodb.Table(APPROVED_TOKENS_TABLE)
     resp = table.get_item(Key={"token": token})
-    return "Item" in resp
+    return resp.get("Item")
 
 
-def _current_watchlist() -> list[str]:
-    table = dynamodb.Table(WATCHLIST_TABLE)
+def _is_valid_token(token: str) -> bool:
+    item = _get_token_item(token)
+    return bool(item) and item.get("status") == TOKEN_STATUS_APPROVED
+
+
+def _find_token_by_email(email: str) -> dict | None:
+    """既に申込み済みかを確認する(招待制ではなくなったため件数が読めず、
+    Scanで十分な小規模を前提とする)。"""
+    table = dynamodb.Table(APPROVED_TOKENS_TABLE)
     resp = table.scan()
+    for item in resp.get("Items", []):
+        if item.get("email") == email:
+            return item
+    return None
+
+
+def _send_confirmation_email(email: str, token: str):
+    link = f"{REGISTER_FUNCTION_URL}?token={token}&confirm=1"
+    body = f"""
+    <p>お申込みありがとうございます。以下のリンクをクリックすると登録が完了します。</p>
+    <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+    <p>心当たりがない場合はこのメールを破棄してください。</p>
+    """
+    ses.send_email(
+        Source=SES_SENDER,
+        Destination={"ToAddresses": [email]},
+        Message={
+            "Subject": {"Data": "【登録確認】株式レポートサービスのお申込み", "Charset": "UTF-8"},
+            "Body": {"Html": {"Data": body, "Charset": "UTF-8"}},
+        },
+    )
+
+
+def _current_watchlist(owner_token: str) -> list[str]:
+    table = dynamodb.Table(WATCHLIST_TABLE)
+    resp = table.query(KeyConditionExpression=Key("owner_token").eq(owner_token))
     return sorted(item["ticker"] for item in resp.get("Items", []))
 
 
-def get_period_mode() -> str:
+def get_period_mode(owner_token: str) -> str:
     """設定が読めなくても画面は出したいので、失敗時は既定モード扱いにする"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": PERIOD_MODE_KEY})
+        resp = table.get_item(Key={"key": user_period_mode_key(owner_token)})
         return normalize_mode(resp.get("Item", {}).get("value"))
     except Exception as e:
         print(f"[WARN] 期間モード取得に失敗: {e}")
         return normalize_mode(None)
 
 
-def set_period_mode(mode: str) -> str:
+def set_period_mode(owner_token: str, mode: str) -> str:
     mode = normalize_mode(mode)
     table = dynamodb.Table(SETTINGS_TABLE)
-    table.put_item(Item={"key": PERIOD_MODE_KEY, "value": mode,
+    table.put_item(Item={"key": user_period_mode_key(owner_token), "value": mode,
                          "updated_at": datetime.now(timezone.utc).isoformat()})
     return mode
 
 
-def _trigger_report(report: str):
-    """daily-batchを非同期(Event)で起動する。
-    レポート生成は40秒前後かかるので、同期で待つとブラウザが固まる。
+def _trigger_report(report: str, owner_token: str):
+    """daily-batchを非同期(Event)で起動する。自分の分だけを送るようowner_tokenを渡す。
+    レポート生成は時間がかかるので、同期で待つとブラウザが固まる。
     起動だけして即座に画面を返し、結果はメールで受け取ってもらう。"""
-    payload = {"force_weekly": True} if report == "selection" else {"monitoring_only": True}
+    payload = {"owner_token": owner_token}
+    payload["force_weekly" if report == "selection" else "monitoring_only"] = True
     lambda_client.invoke(
         FunctionName=DAILY_BATCH_FUNCTION,
         InvocationType="Event",
@@ -104,10 +151,29 @@ def _trigger_report(report: str):
     )
 
 
+def _render_signup_form(notice: str = "") -> str:
+    n1, n2 = random.randint(1, 9), random.randint(1, 9)
+    notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
+    return f"""
+    {notice_html}
+    <h3>株式レポートサービスへのお申込み</h3>
+    <p>メールアドレスを入力すると、確認メールが届きます。リンクをクリックすると登録が完了します。</p>
+    <form method="GET">
+      <input name="signup_email" type="email" placeholder="example@example.com"
+             style="padding:8px;font-size:16px;width:100%;box-sizing:border-box;" required>
+      <p>簡単な確認: {n1} + {n2} = <input name="captcha_answer" style="width:60px;padding:4px;" required></p>
+      <input type="hidden" name="captcha_n1" value="{n1}">
+      <input type="hidden" name="captcha_n2" value="{n2}">
+      <button type="submit" style="padding:8px 16px;">申し込む</button>
+    </form>
+    <p style="color:#888;font-size:12px;">既に招待リンクをお持ちの場合は、そのリンクからアクセスしてください。</p>
+    """
+
+
 def _render_form(token: str, notice: str = "") -> str:
     t = html.escape(token)
-    watchlist = _current_watchlist()
-    mode = get_period_mode()
+    watchlist = _current_watchlist(token)
+    mode = get_period_mode(token)
 
     if watchlist:
         rows = "".join(
@@ -176,7 +242,7 @@ _SEND_FREQ_LABEL = {
 def _render_info(token: str) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
-    mode = get_period_mode()
+    mode = get_period_mode(token)
 
     rows = []
     for key, p in PERIOD_PRESETS.items():
@@ -254,19 +320,80 @@ def _render_info(token: str) -> str:
     """
 
 
+def _handle_signup(params: dict) -> dict:
+    email = (params.get("signup_email") or "").strip().lower()
+    if not EMAIL_RE.match(email):
+        return _page(f"<p>メールアドレスの形式が正しくありません。</p>{_render_signup_form()}", status=400)
+
+    try:
+        n1, n2 = int(params.get("captcha_n1", "")), int(params.get("captcha_n2", ""))
+        answer = int(params.get("captcha_answer", ""))
+    except (TypeError, ValueError):
+        return _page(f"<p>確認の回答が正しくありません。</p>{_render_signup_form()}", status=400)
+    if answer != n1 + n2:
+        return _page(f"<p>確認の回答が正しくありません。</p>{_render_signup_form()}", status=400)
+
+    existing = _find_token_by_email(email)
+    if existing and existing.get("status") == TOKEN_STATUS_APPROVED:
+        _send_confirmation_email_reminder(email, existing["token"])
+        return _page("<p>このメールアドレスは既に登録済みです。アクセス用リンクを再送しました。</p>")
+
+    token = existing["token"] if existing else secrets.token_urlsafe(24)
+    table = dynamodb.Table(APPROVED_TOKENS_TABLE)
+    table.put_item(Item={
+        "token": token, "email": email, "status": TOKEN_STATUS_PENDING,
+        "requested_at": datetime.now(timezone.utc).isoformat(),
+    })
+    _send_confirmation_email(email, token)
+    return _page("<p>確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。</p>")
+
+
+def _send_confirmation_email_reminder(email: str, token: str):
+    link = f"{REGISTER_FUNCTION_URL}?token={token}"
+    body = f"""
+    <p>このメールアドレスは既に登録済みです。以下のリンクをブックマークしてご利用ください。</p>
+    <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+    """
+    ses.send_email(
+        Source=SES_SENDER,
+        Destination={"ToAddresses": [email]},
+        Message={
+            "Subject": {"Data": "アクセスリンクの再送", "Charset": "UTF-8"},
+            "Body": {"Html": {"Data": body, "Charset": "UTF-8"}},
+        },
+    )
+
+
+def _handle_confirm(token: str) -> dict:
+    item = _get_token_item(token)
+    if not item:
+        return _page("<p>無効なリンクです。</p>", status=404)
+    if item.get("status") == TOKEN_STATUS_PENDING:
+        table = dynamodb.Table(APPROVED_TOKENS_TABLE)
+        table.put_item(Item={**item, "status": TOKEN_STATUS_APPROVED,
+                             "approved_at": datetime.now(timezone.utc).isoformat()})
+    return _page(_render_form(token, notice="登録が完了しました。このページのURLをブックマークしてください。"))
+
+
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
 
+    if params.get("confirm"):
+        return _handle_confirm(token)
+
+    if params.get("signup_email"):
+        return _handle_signup(params)
+
     if not _is_valid_token(token):
-        return _page("<p>アクセス権がありません。招待リンクを確認してください。</p>", status=403)
+        return _page(_render_signup_form(), status=403 if token else 200)
 
     if params.get("info"):
         return _page(_render_info(token))
 
     # 期間モードの変更
     if params.get("mode"):
-        mode = set_period_mode(params["mode"])
+        mode = set_period_mode(token, params["mode"])
         label = get_preset(mode)["label"]
         return _page(_render_form(token, notice=f"判定期間を「{label}」に変更しました。次回のレポートから反映されます。"))
 
@@ -275,7 +402,7 @@ def handler(event, context):
     if report in ("selection", "monitoring"):
         label = "選定" if report == "selection" else "監視"
         try:
-            _trigger_report(report)
+            _trigger_report(report, token)
         except Exception as e:
             return _page(f"<p>{label}レポートの送信に失敗しました: {html.escape(str(e))}</p>{_back_link(token)}", status=500)
         return _page(_render_form(token, notice=f"{label}レポートの送信を受け付けました。まもなくメールが届きます。"))
@@ -292,10 +419,10 @@ def handler(event, context):
     table = dynamodb.Table(WATCHLIST_TABLE)
 
     if action == "delete":
-        table.delete_item(Key={"ticker": ticker})
+        table.delete_item(Key={"owner_token": token, "ticker": ticker})
         return _page(_render_form(token, notice=f"{ticker} を監視リストから削除しました。"))
 
-    watchlist = _current_watchlist()
+    watchlist = _current_watchlist(token)
     if ticker not in watchlist and len(watchlist) >= MAX_WATCHLIST_SIZE:
         return _page(
             _render_form(token, notice=f"監視リストは上限{MAX_WATCHLIST_SIZE}件です。"
@@ -306,6 +433,7 @@ def handler(event, context):
     try:
         table.put_item(
             Item={
+                "owner_token": token,
                 "ticker": ticker,
                 "added_at": datetime.now(timezone.utc).isoformat(),
                 "source": "email_or_search",

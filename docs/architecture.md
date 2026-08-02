@@ -4,7 +4,22 @@
 `deploy.sh`が実装（Infrastructure as Code）としての正、このファイルはそれを俯瞰する
 読み物として位置づける。構成を変えたら両方更新すること。
 
-最終更新: 2026-08-02
+最終更新: 2026-08-02（マルチテナント化対応）
+
+## 0. マルチテナント設計の方針
+
+外部公開（誰でも申込み可能）に向けて、以下の方針でデータを利用者ごとに分離した
+（`expert-panel-review`での検討結果）:
+
+- **利用者の識別は招待トークンそのものを使う。別途user_idは発行しない**
+  （トークン漏洩時の影響範囲は元々認証もデータも一体なので新たなリスク増加はない）
+- **利用者ごとに分離するもの**: watchlist（監視リスト）、期間モード、レポート送信先、
+  レポート内リンクのトークン
+- **共有のまま（利用者ごとに分けない）もの**: 選定基準(PEG/成長率/TOP_N)、
+  NASDAQ100構成銘柄キャッシュ、シグナル計算結果（ただし「モードごと」には分離。
+  同じ期間モードを使う利用者同士は計算結果を使い回す）
+- **承認方式**: 管理者承認ではなく、メールアドレス確認（ダブルオプトイン）による
+  完全自動のセルフサーブ。運用者(あなた)の手作業は発生しない
 
 ## 1. 全体構成
 
@@ -36,27 +51,38 @@ register-stock Lambda (Function URL, 認証なしURL+招待トークン)
 ### daily-batch
 - ソース: `handler.py` `config.py` `signals.py` `data_sources.py` `ranking.py` `report.py`
 - トリガー: EventBridge Scheduler（定期実行）、または`register-stock`からの非同期invoke
-- IAMロール: `lambda-daily-batch-role`
-- 環境変数: `SES_SENDER` `SES_RECIPIENT` `REGISTER_FUNCTION_URL` `REGISTER_TOKEN`
-  `WEEKLY_REPORT_WEEKDAY`(既定"0") `TOP_N`(既定3) `WATCHLIST_TABLE` `SIGNAL_HISTORY_TABLE`
-  `SETTINGS_TABLE`
+- IAMロール: 実際のデプロイ先は`stock-report-batch-role`（`deploy.sh`記載の
+  `lambda-daily-batch-role`とは名前が異なる。既知のドリフト、下記5.参照）
+- 環境変数: `SES_SENDER` `SES_RECIPIENT`(エラー通知の送付先=`ADMIN_EMAIL`として流用)
+  `REGISTER_FUNCTION_URL` `WEEKLY_REPORT_WEEKDAY`(既定"0") `TOP_N`(既定3)
+  `WATCHLIST_TABLE` `SIGNAL_HISTORY_TABLE` `SETTINGS_TABLE` `APPROVED_TOKENS_TABLE`
 - invokeイベントの主なフラグ: `monitoring_only` `force_weekly` `simulate_date`
+  `owner_token`(指定時はその利用者の分だけ送る。register-stockの即時送信ボタン用)
+  `_test_trigger_failure`
+- 定期実行時は`approved_tokens`のstatus=approved全員を対象に、期間モードごとに
+  グループ化して選定レポートをスキャン、利用者ごとに個別のメール・個別のトークン
+  入りリンクで送信する(`run_selection_reports`/`run_monitoring_reports`)
 
 ### register-stock
 - ソース: `mnt/user-data/outputs/aws_deploy/lambda_register/handler.py` `config.py`
 - トリガー: Function URL（`AuthType: NONE`、招待トークンはアプリ層で検証）
-- IAMロール: `lambda-register-stock-role`
+- IAMロール: 実際のデプロイ先は`stock-report-register-role`（`deploy.sh`記載の
+  `lambda-register-stock-role`とは名前が異なる。既知のドリフト、下記5.参照）
 - 環境変数: `WATCHLIST_TABLE` `APPROVED_TOKENS_TABLE` `SETTINGS_TABLE`
   `MAX_WATCHLIST_SIZE`(既定5) `DAILY_BATCH_FUNCTION`(既定"daily-batch")
+  `SES_SENDER`(申込み確認メールの送信元) `REGISTER_FUNCTION_URL`(確認メールの
+  リンク生成用、自己参照)
+- ダブルオプトイン: `?signup_email=...`で申込み受付(簡易CAPTCHA付き)→確認メール送信→
+  `?token=...&confirm=1`のリンククリックでapproved化
 
 ## 3. DynamoDBテーブル
 
 | テーブル | 主キー | 用途 |
 |---|---|---|
-| `watchlist` | `ticker`(HASH) | 監視リスト |
-| `signal_history` | `ticker`(HASH) + `date`(RANGE) | 前日比較用のシグナル履歴 |
-| `app_settings` | `key`(HASH) | `period_mode`（期間モード）、`nasdaq100_tickers_cache`（銘柄キャッシュ） |
-| `approved_tokens` | `token`(HASH) | 招待トークン（`email`属性付き） |
+| `watchlist` | `owner_token`(HASH) + `ticker`(RANGE) | 利用者ごとの監視リスト（複合キーで分離、同じtickerを別利用者が独立登録可能） |
+| `signal_history` | `ticker`(HASH) + `date`(RANGE、値は`"YYYY-MM-DD#MODE"`) | 前日比較用のシグナル履歴。モードごとに共有（利用者ごとではない） |
+| `app_settings` | `key`(HASH) | `"{token}#period_mode"`＝利用者ごとの期間モード、`nasdaq100_tickers_cache`＝共有の銘柄キャッシュ |
+| `approved_tokens` | `token`(HASH) | 利用者そのもの。`email`・`status`(`pending`/`approved`)・`requested_at`/`approved_at`属性 |
 
 ## 3a. 監視・通知リソース（TODO#5）
 
@@ -78,17 +104,22 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
 
 | ロール | テーブル/リソース | 権限 |
 |---|---|---|
-| `lambda-daily-batch-role` | `watchlist` | GetItem, PutItem, Scan |
-| | `signal_history` | GetItem, PutItem, Scan |
+| `stock-report-batch-role`(daily-batch) | `watchlist` | GetItem, PutItem, Scan, **Query**(※2) |
+| | `signal_history` | GetItem, PutItem, Scan, Query |
 | | `app_settings` | GetItem, **PutItem**(※1) |
+| | `approved_tokens` | **GetItem, Scan**(※2) |
 | | SES | SendEmail |
-| `lambda-register-stock-role` | `watchlist` | PutItem, DeleteItem, Scan |
-| | `approved_tokens` | GetItem |
+| `stock-report-register-role`(register-stock) | `watchlist` | PutItem, DeleteItem, Scan, **Query**(※2) |
+| | `approved_tokens` | GetItem, **PutItem, Scan**(※2) |
 | | `app_settings` | GetItem, PutItem |
 | | `daily-batch`関数 | InvokeFunction |
+| | SES | **SendEmail**(※2、申込み確認メール用) |
 | `scheduler-invoke-batch-role` | `daily-batch`関数 | InvokeFunction |
 | `claude-deploy`(デプロイ用IAMユーザー、Lambdaロールではない) | SNSトピック`daily-batch-alarm-topic` | CreateTopic, Subscribe, SetTopicAttributes, GetTopicAttributes, ListSubscriptionsByTopic |
 | | CloudWatch Alarm`daily-batch-errors` | PutMetricAlarm, DescribeAlarms, DeleteAlarms |
+| | `watchlist`/`approved_tokens`/`app_settings`/`signal_history` | DeleteTable, CreateTable, UpdateItem, Query(マルチテナント化のテーブル移行作業用) |
+
+※2: マルチテナント化(2026-08-02)で追加。`deploy.sh`にも反映済み。
 
 ※1: TODO#2（NASDAQ100銘柄キャッシュ）の実装時、`daily-batch`ロールに`app_settings`への
 `PutItem`権限が不足していることが本番の403エラーで判明し、`aws iam put-role-policy`で
@@ -103,3 +134,13 @@ CloudWatch Alarmが`INSUFFICIENT_DATA`→`ALARM`に遷移しSNS経由でメー�
   はできない。上表は「`deploy.sh`に書かれているべき内容」であり、実際のロールとの
   完全な一致は`deploy.sh`を再実行するか、コンソール等の別経路での確認が必要。
 - Function URLのリソースポリシー（`Principal: *`が広い件）は`TODO.md`#7を参照。
+- **IAMロール名のドリフト**: `deploy.sh`は`lambda-daily-batch-role`/
+  `lambda-register-stock-role`という名前を使っているが、実際にデプロイされている
+  ロールは`stock-report-batch-role`/`stock-report-register-role`という別名。
+  マルチテナント化のIAM権限追加作業で発覚（実際のロール名は
+  `aws lambda get-function-configuration --query Role`で確認した）。恐らく初回
+  デプロイ時に手動で名前を変えたか、`deploy.sh`とは別の手順で作られたと見られる。
+  実害はない（正しいロールに権限を追加できている）が、`deploy.sh`をそのまま
+  再実行した場合に旧ロール名で新規ロールが作られ、実際に使われているロールに
+  権限が反映されない可能性がある。次に`deploy.sh`を触る際に`deploy.sh`側の
+  ロール名を実際の名前に合わせて修正すべき。
