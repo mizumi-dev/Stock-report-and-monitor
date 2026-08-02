@@ -166,7 +166,7 @@ aws lambda create-function \
   --zip-file fileb://daily_batch.zip \
   --timeout 900 --memory-size 512 \
   --layers "$LAYER_ARN" \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=3}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
     --zip-file fileb://daily_batch.zip --region $AWS_REGION
@@ -233,7 +233,7 @@ echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを
 aws lambda update-function-configuration \
   --function-name daily-batch \
   --timeout 900 \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=3}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
   --region $AWS_REGION
 
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
