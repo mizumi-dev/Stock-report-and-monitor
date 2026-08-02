@@ -70,6 +70,8 @@ for i in 1 2 3 4 5; do
 done
 ```
 
+**The very first invoke right after a deploy can still hit a stale warm execution environment from before the update**, even after `LastUpdateStatus` reports `Successful` and `CodeSha256` matches your local zip's hash — observed repeatedly on this project (a removed diagnostic code path answered once after its own redeploy, then correctly disappeared on the next two invokes; a logging fix behaved the same way). Don't trust a single post-deploy invoke, especially right after two deploys in quick succession — invoke 2-3 times and expect the *later* ones to reflect the new code, not necessarily the first.
+
 If a deploy's result looks impossibly wrong (e.g. the response matches code you replaced two deploys ago), verify by comparing `CodeSha256` against a local hash of the zip before theorizing:
 
 ```bash
