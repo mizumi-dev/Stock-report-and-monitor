@@ -16,6 +16,10 @@ In a sandboxed or remote environment you likely have no AWS credentials and poss
 
 Running commands yourself gives immediate verifiable feedback (exit codes, real API responses) and lets you adapt on the spot — e.g. discovering the deployed IAM role isn't named what the README says and just using the real name.
 
+## This user's confirmed environment
+
+**Runs IAM/admin commands you hand off on PowerShell.** Whenever a command needs to be run by the user themselves (typically IAM changes on their admin credentials, since the agent's scoped deploy user can't self-escalate), always output it in PowerShell-compatible form: one line, no trailing `\` continuation. Don't ask which shell they're on for these — it's settled.
+
 ## The workflow
 
 ### 1. Ask for scoped, not root, credentials
