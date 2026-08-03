@@ -28,12 +28,49 @@ def test_selection_report_footer_link_has_no_query_ampersand():
 
 def test_selection_report_includes_broker_links():
     ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
-    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
 
     body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
 
     assert 'href="https://www.moomoo.com/ja/stock/NVDA-US"' in body
     assert 'href="https://www.rakuten-sec.co.jp/web/market/search/us_search/quote.html?ric=NVDA.O"' in body
+
+
+def test_selection_report_includes_signal_legend():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "PEG" in body and "参考情報" in body
+
+
+def test_selection_report_distinguishes_fresh_cross_from_continued_alignment():
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 1.1, "earnings_growth": 0.3},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                "trend_detail": {"buy_cross": True, "buy_alignment": True}},
+        "BBB": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                "trend_detail": {"buy_cross": False, "buy_alignment": True}},
+    }
+
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+
+    assert "ゴールデンクロス発生(直近)" in body
+    assert "上昇トレンド継続中(直近のクロスではありません)" in body
+
+
+def test_selection_report_shows_downtrend_warning_even_if_peg_passed_gate():
+    ranked = [{"ticker": "NXPI", "company_name": "NXP", "peg": 1.5, "earnings_growth": 0.3}]
+    signals_map = {"NXPI": {"buy_trend": False, "buy_momentum": True, "volume_high": False,
+                            "trend_detail": {"sell_cross": True}}}
+
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+
+    assert "デッドクロス発生" in body
 
 
 def test_monitoring_report_includes_broker_links():
