@@ -15,9 +15,10 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
   という要望を踏まえ、EventBridge Schedulerの時刻指定を`America/New_York`のローカル
   時刻基準(`cron(0 6 ? * MON-FRI *)`、`--schedule-expression-timezone`指定)に変更。
   AWSがDSTを自動調整するため今後手動対応は不要。週末は新しい取引データが存在しない
-  ため、月曜朝6時ET実行時点で自動的に前週金曜までのデータになる。`deploy.sh`のみ
-  修正済み、**本番のEventBridge Scheduler(`daily-stock-report`)への反映はまだ**
-  （`scheduler:UpdateSchedule`権限が必要）
+  ため、月曜朝6時ET実行時点で自動的に前週金曜までのデータになる。`deploy.sh`修正済み。
+  **本番のEventBridge Scheduler(`daily-stock-report`)への反映も完了（2026-08-03、
+  ユーザーがAWSコンソールから直接編集）**。当初us-east-1のスケジュールがコンソール上
+  見当たらなかったが、リージョン選択が東京(ap-northeast-1)になっていたことが原因と判明
 - **証券会社への行動リンクを追加**: 選定・監視レポートの各銘柄カードに、moomoo証券
   (`https://www.moomoo.com/ja/stock/{ticker}-US`、ユーザー本人が実機で確認した実在URL)・
   楽天証券(`https://www.rakuten-sec.co.jp/web/market/search/us_search/quote.html?ric={ticker}.O`、
