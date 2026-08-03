@@ -231,7 +231,7 @@ def run_monitoring_reports(users: list[dict]):
             })
             save_signals(t, mode, sig)
 
-        body = build_monitoring_report(results, preset["label"], skipped)
+        body = build_monitoring_report(results, preset["label"], skipped, REGISTER_URL, u["token"])
         send_email("📊 本日の監視レポート", body, u["email"])
 
 

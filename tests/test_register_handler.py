@@ -244,6 +244,20 @@ class TestLanguage:
         r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
         assert "Added NVDA to your watchlist." in r["body"]
 
+    def test_footer_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        assert "About" in r["body"] and "Contact" in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_footer_is_japanese_by_default(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN), None)
+        assert "運営者情報" in r["body"]
+
+    def test_period_dropdown_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        assert "Mid-term" in r["body"]
+        assert "中期" not in r["body"]
+
 
 class TestTickerRegistration:
     def test_register_valid_ticker(self, rh):

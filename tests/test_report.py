@@ -48,3 +48,22 @@ def test_monitoring_report_includes_broker_links():
 
     assert 'href="https://www.moomoo.com/ja/stock/AAPL-US"' in body
     assert 'href="https://www.rakuten-sec.co.jp/web/market/search/us_search/quote.html?ric=AAPL.O"' in body
+
+
+def test_monitoring_report_includes_register_page_link_when_provided():
+    watchlist_results = [{
+        "ticker": "AAPL", "price": 210.5, "prev_close": 208.0,
+        "signals": {"buy_trend": True, "buy_momentum": False, "sell_trend": False,
+                    "sell_momentum": False, "volume_high": False, "volume_ratio": 1.1},
+        "prev_signals": {},
+    }]
+
+    body = build_monitoring_report(watchlist_results, register_base_url="https://pegsignal.com/",
+                                    register_token="tok123")
+
+    assert 'href="https://pegsignal.com/?token=tok123"' in body
+
+
+def test_monitoring_report_omits_register_link_when_not_provided():
+    body = build_monitoring_report([])
+    assert "登録ページを開く" not in body

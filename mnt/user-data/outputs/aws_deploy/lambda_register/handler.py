@@ -61,6 +61,17 @@ LANG_JA = "ja"
 LANG_EN = "en"
 SUPPORTED_LANGS = (LANG_JA, LANG_EN)
 
+# config.py の PERIOD_PRESETS (ラベル・説明文) はdaily-batchとも共有しているため、
+# 英訳はここに閉じたローカルの対訳表として持つ(共有側に手を入れると影響範囲が広がるため)
+_PERIOD_PRESET_LABELS_EN = {
+    "SHORT": {"label": "Short-term",
+              "description": "Reacts fast to price moves. More signals, but more false ones too."},
+    "MID": {"label": "Mid-term",
+            "description": "Standard daily-swing setup, filtered by the 200-day average."},
+    "LONG": {"label": "Long-term",
+             "description": "Tracks broad trend reversals via the 50/200-day cross. Fires a few times a year."},
+}
+
 
 def _detect_request_lang(event) -> str:
     """トークンを持たない新規訪問者(申込みフォーム)向け。
@@ -174,7 +185,20 @@ details p:last-child{margin-bottom:0;}
 """
 
 
-def _page(inner_html: str, status=200):
+def _page(inner_html: str, status=200, lang: str = LANG_JA):
+    if lang == LANG_EN:
+        # 遷移先(about/contact/privacy/terms)自体はまだ日本語のみ(TODO.md参照)だが、
+        # フッターのナビゲーション自体は英語で読めるようにしておく
+        footer = (
+            '<a href="?about=1">About</a> ・ <a href="?contact=1">Contact</a> ・ '
+            '<a href="?privacy=1">Privacy Policy</a> ・ <a href="?terms=1">Terms</a>'
+            ' <span class="muted">(Japanese only for now)</span>'
+        )
+    else:
+        footer = (
+            '<a href="?about=1">運営者情報</a> ・ <a href="?contact=1">お問い合わせ</a> ・ '
+            '<a href="?privacy=1">プライバシーポリシー</a> ・ <a href="?terms=1">利用規約</a>'
+        )
     return _response(
         f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <meta charset="utf-8">
@@ -190,9 +214,7 @@ def _page(inner_html: str, status=200):
         <div class="card">
         {inner_html}
         </div>
-        <p class="site-footer muted">
-          <a href="?about=1">運営者情報</a> ・ <a href="?contact=1">お問い合わせ</a> ・
-          <a href="?privacy=1">プライバシーポリシー</a> ・ <a href="?terms=1">利用規約</a></p>
+        <p class="site-footer muted">{footer}</p>
         </body></html>""",
         status=status,
     )
@@ -574,9 +596,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
             list_html = f"<p>{empty_watchlist}</p>"
 
         options = "".join(
-            f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
-            for k, p in PERIOD_PRESETS.items()
+            f'<option value="{k}"{" selected" if k == mode else ""}>{_PERIOD_PRESET_LABELS_EN[k]["label"]}</option>'
+            for k in PERIOD_PRESETS
         )
+        preset_en = _PERIOD_PRESET_LABELS_EN[mode]
         notice_html = f'<p class="notice">{notice}</p>' if notice else ""
         lang_switch = (
             f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
@@ -600,8 +623,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           <select name="mode" style="padding:8px;font-size:16px;">{options}</select>
           <button type="submit" style="padding:8px 16px;">Change</button>
         </form>
-        <p style="color:#888;font-size:12px;">Current: <strong>{preset['label']}</strong> — {preset['description']}
-        <br><span class="muted">(Time horizon names are Japanese for now; English labels are planned.)</span></p>
+        <p style="color:#888;font-size:12px;">Current: <strong>{preset_en['label']}</strong> — {preset_en['description']}</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -760,7 +782,7 @@ def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
     email = (params.get("signup_email") or "").strip().lower()
     if not EMAIL_RE.match(email):
         msg = "Please enter a valid email address." if lang == LANG_EN else "メールアドレスの形式が正しくありません。"
-        return _page(f"<p>{msg}</p>{_render_signup_form(lang)}", status=400)
+        return _page(f"<p>{msg}</p>{_render_signup_form(lang)}", status=400, lang=lang)
 
     try:
         n1, n2 = int(params.get("captcha_n1", "")), int(params.get("captcha_n2", ""))
@@ -769,14 +791,14 @@ def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
         answer = None
     captcha_msg = "That answer wasn't correct, please try again." if lang == LANG_EN else "確認の回答が正しくありません。"
     if answer is None or answer != n1 + n2:
-        return _page(f"<p>{captcha_msg}</p>{_render_signup_form(lang)}", status=400)
+        return _page(f"<p>{captcha_msg}</p>{_render_signup_form(lang)}", status=400, lang=lang)
 
     existing = _find_token_by_email(email)
     if existing and existing.get("status") == TOKEN_STATUS_APPROVED:
         _send_confirmation_email_reminder(email, existing["token"])
         msg = ("This email is already registered. We've resent your access link." if lang == LANG_EN
                else "このメールアドレスは既に登録済みです。アクセス用リンクを再送しました。")
-        return _page(f"<p>{msg}</p>")
+        return _page(f"<p>{msg}</p>", lang=lang)
 
     token = existing["token"] if existing else secrets.token_urlsafe(24)
     table = dynamodb.Table(APPROVED_TOKENS_TABLE)
@@ -788,7 +810,7 @@ def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
     _send_confirmation_email(email, token)
     msg = ("We've sent a confirmation email. Click the link inside to complete your registration."
            if lang == LANG_EN else "確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。")
-    return _page(f"<p>{msg}</p>")
+    return _page(f"<p>{msg}</p>", lang=lang)
 
 
 def _send_confirmation_email_reminder(email: str, token: str):
@@ -916,7 +938,7 @@ def _handle_confirm(token: str) -> dict:
     lang = _get_user_lang(item)
     notice = ("Registration complete! Bookmark this page's URL." if lang == LANG_EN
               else "登録が完了しました。このページのURLをブックマークしてください。")
-    return _page(_render_form(token, lang, notice=notice))
+    return _page(_render_form(token, lang, notice=notice), lang=lang)
 
 
 def handler(event, context):
@@ -959,13 +981,13 @@ def handler(event, context):
         return _page(_render_info(token))
 
     if not _is_valid_token(token):
-        return _page(_render_signup_form(lang), status=403 if token else 200)
+        return _page(_render_signup_form(lang), status=403 if token else 200, lang=lang)
 
     # 言語の手動切替(期間モードと同じ仕組み)。メイン画面のリンクから、
     # どちらのドメインからアクセスしていても言語を切り替えられる
     if params.get("lang") in SUPPORTED_LANGS:
         lang = _set_user_lang(token, params["lang"])
-        return _page(_render_form(token, lang))
+        return _page(_render_form(token, lang), lang=lang)
 
     # 退会(登録データの自己削除)。トークンが有効な間だけ操作でき、
     # お問い合わせフォーム経由の手動対応を待たずにその場で完結する
@@ -973,7 +995,7 @@ def handler(event, context):
         return _handle_delete_account(token, lang)
 
     if params.get("delete_account"):
-        return _page(_render_delete_confirm(token, lang))
+        return _page(_render_delete_confirm(token, lang), lang=lang)
 
     # 期間モードの変更
     if params.get("mode"):
@@ -981,7 +1003,7 @@ def handler(event, context):
         label = get_preset(mode)["label"]
         notice = (f'Time horizon changed to "{label}". This applies from the next report.' if lang == LANG_EN
                   else f"判定期間を「{label}」に変更しました。次回のレポートから反映されます。")
-        return _page(_render_form(token, lang, notice=notice))
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     # レポートの即時送信(非同期起動)
     report = (params.get("report") or "").strip().lower()
@@ -992,7 +1014,7 @@ def handler(event, context):
         if wait > 0:
             notice = (f"Please wait {wait} more seconds before requesting another report." if lang == LANG_EN
                       else f"連続でのレポート送信リクエストはできません。あと{wait}秒お待ちください。")
-            return _page(_render_form(token, lang, notice=notice), status=429)
+            return _page(_render_form(token, lang, notice=notice), status=429, lang=lang)
         try:
             _trigger_report(report, token)
         except Exception as e:
@@ -1002,13 +1024,13 @@ def handler(event, context):
         _record_report_request(token)
         notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email shortly." if lang == LANG_EN
                   else f"{label}レポートの送信を受け付けました。まもなくメールが届きます。")
-        return _page(_render_form(token, lang, notice=notice))
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     ticker = (params.get("ticker") or "").strip().upper()
     action = (params.get("action") or "register").strip().lower()
 
     if not ticker:
-        return _page(_render_form(token, lang))
+        return _page(_render_form(token, lang), lang=lang)
 
     if not TICKER_RE.match(ticker):
         msg = "Invalid ticker." if lang == LANG_EN else "無効なティッカーです。"
@@ -1020,21 +1042,21 @@ def handler(event, context):
         table.delete_item(Key={"owner_token": token, "ticker": ticker})
         notice = (f"Removed {ticker} from your watchlist." if lang == LANG_EN
                   else f"{ticker} を監視リストから削除しました。")
-        return _page(_render_form(token, lang, notice=notice))
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     if not _is_known_ticker(ticker):
         notice = (f'Couldn\'t find a ticker called "{ticker}". Please check the symbol '
                    f"against NASDAQ100 constituents and try again." if lang == LANG_EN
                   else f"「{ticker}」という銘柄は見つかりませんでした。"
                        f"NASDAQ100構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
-        return _page(_render_form(token, lang, notice=notice), status=400)
+        return _page(_render_form(token, lang, notice=notice), status=400, lang=lang)
 
     watchlist = _current_watchlist(token)
     if ticker not in watchlist and len(watchlist) >= MAX_WATCHLIST_SIZE:
         notice = (f"Your watchlist is limited to {MAX_WATCHLIST_SIZE} stocks. "
                    f"Remove one before adding another." if lang == LANG_EN
                   else f"監視リストは上限{MAX_WATCHLIST_SIZE}件です。他の銘柄を削除してから登録してください。")
-        return _page(_render_form(token, lang, notice=notice), status=400)
+        return _page(_render_form(token, lang, notice=notice), status=400, lang=lang)
 
     try:
         table.put_item(
@@ -1049,8 +1071,8 @@ def handler(event, context):
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
         notice = (f"{ticker} is already in your watchlist." if lang == LANG_EN
                   else f"{ticker} はすでに監視リストに登録済みです。")
-        return _page(_render_form(token, lang, notice=notice))
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     notice = (f"Added {ticker} to your watchlist." if lang == LANG_EN
               else f"{ticker} を監視リストに登録しました。")
-    return _page(_render_form(token, lang, notice=notice))
+    return _page(_render_form(token, lang, notice=notice), lang=lang)
