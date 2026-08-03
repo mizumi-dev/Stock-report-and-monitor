@@ -146,6 +146,43 @@ class TestSignup:
         assert "監視リスト" in r2["body"]
 
 
+class TestTickerValidation:
+    def test_unknown_ticker_rejected_when_cache_present(self, rh):
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "AAPL"]})
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="ZZZZZ"), None)
+        assert r["statusCode"] == 400
+        assert "見つかりませんでした" in r["body"]
+        assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
+
+    def test_known_ticker_accepted_when_cache_present(self, rh):
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "AAPL"]})
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
+        assert r["statusCode"] == 200
+        assert rh.dynamodb.Table("watchlist").scan()["Items"][0]["ticker"] == "NVDA"
+
+    def test_registration_allowed_when_cache_missing(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="ZZZZZ"), None)
+        assert r["statusCode"] == 200
+        assert rh.dynamodb.Table("watchlist").scan()["Items"][0]["ticker"] == "ZZZZZ"
+
+    def test_deleting_ticker_not_in_cache_is_still_allowed(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, ticker="ZZZZZ"), None)
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "AAPL"]})
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="ZZZZZ", action="delete"), None)
+        assert r["statusCode"] == 200
+        assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
+
+
+class TestAccessRecoveryHint:
+    def test_signup_form_mentions_resend_on_lost_link(self, rh):
+        r = rh.handler(_event(), None)
+        assert r["statusCode"] == 200
+        assert "アクセス用リンクを再送します" in r["body"]
+
+
 class TestTickerRegistration:
     def test_register_valid_ticker(self, rh):
         r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)

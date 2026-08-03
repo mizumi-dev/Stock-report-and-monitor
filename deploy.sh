@@ -242,10 +242,17 @@ aws lambda update-function-configuration \
   --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
   --region $AWS_REGION
 
-echo "=== 9. EventBridge Scheduler 設定(毎日 米東部17時=UTC22時 平日) ==="
+echo "=== 9. EventBridge Scheduler 設定(毎営業日 米東部6:00、米国市場の寄り付き(9:30 ET)より前) ==="
+# タイムゾーンをAmerica/New_Yorkで指定することで夏時間(DST)をAWS側が自動調整する。
+# 従来はUTC固定(22:00 UTC)で運用していたが、これだと実行日のUTC曜日と現地(米東部/日本)の
+# 暦日がずれることがあり(UTC月曜22時 = 米東部月曜17時だが日本時間は火曜7時)、
+# 「月曜配信のつもりが利用者には火曜朝に届く」ようなズレの原因になっていた。
+# 現地時間基準にすることで、月曜の実行は必ず米国市場の月曜の寄り付き前に行われ、
+# 週末は新しい取引データが存在しないため自動的に「前週金曜までのデータ」になる。
 aws scheduler create-schedule \
   --name daily-stock-report \
-  --schedule-expression "cron(0 22 ? * MON-FRI *)" \
+  --schedule-expression "cron(0 6 ? * MON-FRI *)" \
+  --schedule-expression-timezone "America/New_York" \
   --flexible-time-window '{"Mode": "OFF"}' \
   --target "{\"Arn\":\"arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch\",\"RoleArn\":\"arn:aws:iam::$ACCOUNT_ID:role/scheduler-invoke-batch-role\"}" \
   --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
