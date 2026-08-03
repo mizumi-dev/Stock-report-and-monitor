@@ -104,3 +104,23 @@ def test_monitoring_report_includes_register_page_link_when_provided():
 def test_monitoring_report_omits_register_link_when_not_provided():
     body = build_monitoring_report([])
     assert "登録ページを開く" not in body
+
+
+def test_selection_report_includes_unsubscribe_link():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+
+    assert 'href="https://pegsignal.com/?token=tok123&amp;delete_account=1"' in body
+
+
+def test_monitoring_report_includes_unsubscribe_link_when_token_provided():
+    body = build_monitoring_report([], register_base_url="https://pegsignal.com/", register_token="tok123")
+    assert 'href="https://pegsignal.com/?token=tok123&amp;delete_account=1"' in body
+
+
+def test_monitoring_report_omits_unsubscribe_link_when_not_provided():
+    body = build_monitoring_report([])
+    assert "delete_account=1" not in body

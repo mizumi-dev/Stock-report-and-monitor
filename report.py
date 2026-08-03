@@ -75,6 +75,17 @@ def _broker_links(ticker: str) -> str:
     )
 
 
+def _unsubscribe_link(register_base_url: str, register_token: str) -> str:
+    """メールを見ている場でそのまま退会できるよう、登録ページの退会確認画面への
+    リンクを直接張る(?delete_account=1は確認画面を表示するだけで、実際の削除は
+    確認画面のボタンをもう一度押すまで実行されない)。"""
+    return (
+        f'<p style="margin:16px 0 0;font-size:12px;">'
+        f'<a href="{register_base_url}?token={register_token}&amp;delete_account=1" style="color:#888;">'
+        f"配信停止・退会はこちら →</a></p>"
+    )
+
+
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
                            register_token: str, mode_label: str = "") -> str:
     """選定（買い時）レポート・週次"""
@@ -114,6 +125,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
       {body_rows}
       <p><a href="{register_form_url}">検索ボックスから他の銘柄を登録する →</a></p>
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
+      {_unsubscribe_link(register_base_url, register_token)}
     </body></html>
     """
 
@@ -179,11 +191,13 @@ def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
         )
 
     register_link = ""
+    unsubscribe_link = ""
     if register_base_url and register_token:
         register_link = (
             f'<p><a href="{register_base_url}?token={register_token}">'
             f"銘柄を追加・削除する（登録ページを開く） →</a></p>"
         )
+        unsubscribe_link = _unsubscribe_link(register_base_url, register_token)
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
@@ -194,5 +208,6 @@ def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
       {skipped_note}
       {register_link}
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
+      {unsubscribe_link}
     </body></html>
     """
