@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 from config import (
     MAX_PEG,
     MIN_GROWTH,
+    NASDAQ100_CACHE_KEY,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
@@ -236,6 +237,23 @@ def _current_watchlist(owner_token: str) -> list[str]:
     return sorted(item["ticker"] for item in resp.get("Items", []))
 
 
+def _is_known_ticker(ticker: str) -> bool:
+    """daily-batchが保存するNASDAQ100構成銘柄キャッシュと突き合わせ、
+    実在しない/打ち間違えたティッカーの登録を防ぐ(TODO#13)。
+    キャッシュ自体が未生成・読み取り失敗の場合は、正しい銘柄の登録を
+    誤ってブロックしないよう許可する(fail-open)"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
+        known = resp.get("Item", {}).get("value")
+        if not known:
+            return True
+        return ticker in known
+    except Exception as e:
+        print(f"[WARN] 銘柄キャッシュの確認に失敗、登録は許可: {e}")
+        return True
+
+
 def get_period_mode(owner_token: str) -> str:
     """設定が読めなくても画面は出したいので、失敗時は既定モード扱いにする"""
     try:
@@ -351,7 +369,9 @@ def _render_signup_form(notice: str = "") -> str:
       お申込みは <a href="?terms=1">利用規約</a>・<a href="?privacy=1">プライバシーポリシー</a>
       への同意とみなされます。本サービスは日本・米国在住の方向けです。
       <strong>欧州経済領域(EEA)・英国・スイス在住の方はお申込みをご遠慮ください。</strong></p>
-    <p class="muted">既に招待リンクをお持ちの場合は、そのリンクからアクセスしてください。</p>
+    <p class="muted">既に登録済みの方は、そのままお持ちのアクセス用リンクからご利用ください。
+    <strong>アクセス用リンクを紛失した場合は、登録時と同じメールアドレスでもう一度
+    上記フォームからお申込みください。アクセス用リンクを再送します。</strong></p>
     """
 
 
@@ -555,6 +575,10 @@ def _render_info(token: str) -> str:
       （yfinanceライブラリ）</strong>から取得。PEGは「株価収益率(PER) ÷ 利益成長率」で、
       低いほど成長性に対して割安とされる指標です。当サービスでの再計算はしていません。
       発行頻度はモードによって異なります（短期=毎日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
+      <p class="muted">配信タイミング: 米国市場が開く前（米東部時間 朝6:00、日本時間では
+      夏時間中は夜19:00頃・冬時間中は夜20:00頃）に、直前の取引日までのデータで配信します。
+      週明け分は、週末に新しい取引データが存在しないため、自動的に前週金曜までのデータに
+      なります。</p>
     </details>
 
     <details>
@@ -797,6 +821,14 @@ def handler(event, context):
     if action == "delete":
         table.delete_item(Key={"owner_token": token, "ticker": ticker})
         return _page(_render_form(token, notice=f"{ticker} を監視リストから削除しました。"))
+
+    if not _is_known_ticker(ticker):
+        return _page(
+            _render_form(token, notice=f"「{ticker}」という銘柄は見つかりませんでした。"
+                                       f"NASDAQ100構成銘柄の中から、ティッカーを確認して"
+                                       f"もう一度お試しください。"),
+            status=400,
+        )
 
     watchlist = _current_watchlist(token)
     if ticker not in watchlist and len(watchlist) >= MAX_WATCHLIST_SIZE:

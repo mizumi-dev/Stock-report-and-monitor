@@ -9,6 +9,23 @@ def _signal_dot(flag: bool) -> str:
     return "●" if flag else "○"
 
 
+def _broker_links(ticker: str) -> str:
+    """レポートを見てすぐ行動に移せるよう、証券会社の銘柄ページへのリンクを添える。
+    tickerは登録時にTICKER_RE(英大文字・数字1〜6文字)で検証済みのため、
+    URLエンコード等は行わずそのまま埋め込んで問題ない。
+    現時点では利用者は全員日本語版(pegsignal.com)経由の想定のため、日本の証券会社のみ。
+    英語版(en.pegsignal.com)が実装され利用者ごとの言語属性が持てるようになったら、
+    英語圏の利用者には米国の証券会社(Robinhood/Fidelity等、要調査)のリンクに出し分ける"""
+    moomoo_url = f"https://www.moomoo.com/ja/stock/{ticker}-US"
+    # RIC(Reuters Instrument Code)形式。NASDAQ銘柄は".O"サフィックスが一般的
+    rakuten_url = f"https://www.rakuten-sec.co.jp/web/market/search/us_search/quote.html?ric={ticker}.O"
+    return (
+        f'<p style="margin:4px 0;font-size:13px;">'
+        f'<a href="{moomoo_url}">moomoo証券で見る →</a>　'
+        f'<a href="{rakuten_url}">楽天証券で見る →</a></p>'
+    )
+
+
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
                            register_token: str, mode_label: str = "") -> str:
     """選定（買い時）レポート・週次"""
@@ -40,6 +57,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
               <p style="margin:4px 0;">PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%</p>
               <p style="margin:4px 0;">シグナル: {lamps}</p>
               <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
+              {_broker_links(s['ticker'])}
             </div>
             """)
         body_rows = f"<p>🔎 サマリー<br>{summary}</p>" + "".join(cards)
@@ -98,6 +116,7 @@ def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
           <p style="margin:4px 0;">出来高: {'急増' if sig.get('volume_high') else '平常'}（20日平均比{sig.get('volume_ratio')}倍）</p>
           <p style="margin:4px 0;">警告: {warn_text}</p>
           <p style="margin:4px 0;">PEG(参考): {r.get('peg','―')}</p>
+          {_broker_links(r['ticker'])}
         </div>
         """)
 
