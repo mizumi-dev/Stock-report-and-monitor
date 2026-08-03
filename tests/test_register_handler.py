@@ -148,6 +148,24 @@ class TestSignup:
         assert r2["statusCode"] == 200
         assert "監視リスト" in r2["body"]
 
+    def test_confirmation_email_is_english_when_lang_is_en(self, rh):
+        rh.handler(_event(_headers={"x-site-lang": "en"}, signup_email="new@example.com",
+                          captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        assert rh.ses.send_email.called
+        sent = rh.ses.send_email.call_args.kwargs
+        assert "Confirm your registration" in sent["Message"]["Subject"]["Data"]
+        assert "Thanks for signing up" in sent["Message"]["Body"]["Html"]["Data"]
+
+    def test_reminder_email_uses_existing_users_stored_lang(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": "existing-tok", "email": "existing@example.com",
+                  "status": "approved", "lang": "en"})
+        # 再申込み時のヘッダーが日本語版ドメインでも、本人の保存済み言語(en)で再送する
+        rh.handler(_event(_headers={"x-site-lang": "ja"}, signup_email="existing@example.com",
+                          captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        sent = rh.ses.send_email.call_args.kwargs
+        assert "Bookmark the link" in sent["Message"]["Body"]["Html"]["Data"]
+
 
 class TestTickerValidation:
     def test_unknown_ticker_rejected_when_cache_present(self, rh):
@@ -442,3 +460,57 @@ class TestPeriodMode:
             Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
         rh.handler(_event(token=VALID_TOKEN, mode="SHORT"), None)
         assert rh.get_period_mode("other-tok") == "MID"  # 他人のモード変更は影響しない
+
+
+class TestInfoPagesLanguage:
+    """?about=1・?contact=1・?privacy=1・?terms=1・?info=1の各ページが
+    アクセス言語(X-Site-Langヘッダー)に応じて英訳版を返すことを確認する。"""
+
+    def test_about_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, about="1"), None)
+        assert r["statusCode"] == 200
+        assert "About" in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_about_page_is_japanese_by_default(self, rh):
+        r = rh.handler(_event(about="1"), None)
+        assert "運営者情報" in r["body"]
+
+    def test_contact_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, contact="1"), None)
+        assert "Contact" in r["body"]
+        assert "お問い合わせ" not in r["body"]
+
+    def test_privacy_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, privacy="1"), None)
+        assert "Privacy Policy" in r["body"]
+        assert "プライバシーポリシー" not in r["body"]
+
+    def test_terms_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, terms="1"), None)
+        assert "Terms of Service" in r["body"]
+        assert "利用規約" not in r["body"]
+
+    def test_info_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, info="1"), None)
+        assert "How this service works" in r["body"]
+        assert "このサービスの仕組み" not in r["body"]
+
+    def test_info_page_reflects_stored_lang_for_known_token(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": VALID_TOKEN, "email": "user@example.com",
+                  "status": "approved", "lang": "en"})
+        r = rh.handler(_event(_headers={"x-site-lang": "ja"}, token=VALID_TOKEN, info="1"), None)
+        assert "How this service works" in r["body"]
+
+    def test_contact_submit_error_messages_are_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, contact_submit="1",
+                              contact_email="not-an-email", contact_message="hi",
+                              captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        assert "isn't valid" in r["body"]
+
+    def test_contact_submit_success_message_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, contact_submit="1",
+                              contact_email="a@example.com", contact_message="hi",
+                              captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        assert "We've received your message" in r["body"]
