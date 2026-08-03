@@ -52,6 +52,38 @@ ses = boto3.client("ses")
 TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
+# 英語版(en.pegsignal.com)対応。CloudFrontのオリジンカスタムヘッダー(X-Site-Lang)で
+# どちらのドメイン経由かを判定する(deploy_domain_en.sh/deploy_patch_ja_lang_header.sh参照)。
+# 登録済み利用者は申込み時に判定した言語をapproved_tokensの"lang"属性として保存し、
+# 以後はどちらのドメインからアクセスしても保存済みの言語で表示する
+# (期間モードと同じ仕組みで、メイン画面からいつでも手動切替もできる)
+LANG_JA = "ja"
+LANG_EN = "en"
+SUPPORTED_LANGS = (LANG_JA, LANG_EN)
+
+
+def _detect_request_lang(event) -> str:
+    """トークンを持たない新規訪問者(申込みフォーム)向け。
+    ヘッダーがない場合(Function URL直叩き等)は日本語を既定とする"""
+    headers = event.get("headers") or {}
+    value = (headers.get("x-site-lang") or "").strip().lower()
+    return value if value in SUPPORTED_LANGS else LANG_JA
+
+
+def _get_user_lang(token_item: dict | None) -> str:
+    """登録済み利用者の保存済み言語設定。未設定なら日本語"""
+    lang = (token_item or {}).get("lang")
+    return lang if lang in SUPPORTED_LANGS else LANG_JA
+
+
+def _set_user_lang(token: str, lang: str) -> str:
+    lang = lang if lang in SUPPORTED_LANGS else LANG_JA
+    table = dynamodb.Table(APPROVED_TOKENS_TABLE)
+    item = _get_token_item(token)
+    if item:
+        table.put_item(Item={**item, "lang": lang})
+    return lang
+
 
 def _response(body: str, status=200):
     return {
@@ -314,8 +346,67 @@ def _record_report_request(owner_token: str):
                          "value": datetime.now(timezone.utc).isoformat()})
 
 
-def _render_signup_form(notice: str = "") -> str:
+def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     n1, n2 = random.randint(1, 9), random.randint(1, 9)
+
+    if lang == LANG_EN:
+        notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+        return f"""
+        {notice_html}
+        <p class="eyebrow">PegSignal (free, indie-built)</p>
+        <h1>Track undervalued NASDAQ100 growth stocks, every morning</h1>
+        <p class="trust-line">🔒 Your email is used only for report delivery, no spam.
+        <a href="?about=1">Delete your data anytime, one click.</a></p>
+
+        <div class="sample-card">
+          <div class="sample-label">Sample email</div>
+          <div class="sample-row">
+            <span class="ticker">NVDA</span>
+            <span class="pill buy">🟢 Buy signal</span>
+          </div>
+          <div class="sample-row">
+            <span class="ticker">AVGO</span>
+            <span class="pill neutral">⚪ No signal</span>
+          </div>
+          <p class="muted" style="margin:8px 0 0;">Illustrative only — actual content changes daily with the market.</p>
+        </div>
+
+        <div class="steps">
+          <div class="step"><div class="step-num">1</div><div class="step-label">Sign up</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-label">Pick stocks</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-label">Daily reports</div></div>
+        </div>
+
+        <details>
+          <summary>How stocks are picked, and important notes</summary>
+          <p>We screen NASDAQ100 constituents for undervalued growth stocks by
+          <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
+          we monitor trend, momentum, and volume signals daily.</p>
+          <p class="muted">Not investment advice. Data comes from Yahoo Finance; we don't
+          guarantee its accuracy or timeliness. See <a href="?info=1">how it works</a>
+          (Japanese only for now) for details.</p>
+        </details>
+
+        <h3>Sign up</h3>
+        <p class="muted">Your email is used <strong>only to deliver reports and your
+        access link</strong>, and is never shared with third parties. Built and run by
+        an individual developer (<a href="?about=1">about</a>).</p>
+        <form method="GET">
+          <input name="signup_email" type="email" placeholder="example@example.com"
+                 style="width:100%;" required>
+          <p>Quick check: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
+          <input type="hidden" name="captcha_n1" value="{n1}">
+          <input type="hidden" name="captcha_n2" value="{n2}">
+          <button type="submit">Sign up</button>
+        </form>
+        <p class="muted">
+          By signing up you agree to our <a href="?terms=1">Terms</a> and
+          <a href="?privacy=1">Privacy Policy</a> (Japanese only for now).</p>
+        <p class="muted">Already signed up? Use your existing access link.
+        <strong>If you lost it, sign up again with the same email address above
+        and we'll resend it.</strong></p>
+        """
+
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
     return f"""
     {notice_html}
@@ -463,10 +554,69 @@ def _render_contact_form(notice: str = "") -> str:
     """
 
 
-def _render_form(token: str, notice: str = "") -> str:
+def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
     t = html.escape(token)
     watchlist = _current_watchlist(token)
     mode = get_period_mode(token)
+    preset = get_preset(mode)
+
+    if lang == LANG_EN:
+        delete_label = "delete"
+        empty_watchlist = "(Your watchlist is empty)"
+        if watchlist:
+            rows = "".join(
+                f'<li>{html.escape(x)} '
+                f'<a href="?token={t}&ticker={html.escape(x)}&action=delete">[{delete_label}]</a></li>'
+                for x in watchlist
+            )
+            list_html = f"<ul>{rows}</ul>"
+        else:
+            list_html = f"<p>{empty_watchlist}</p>"
+
+        options = "".join(
+            f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
+            for k, p in PERIOD_PRESETS.items()
+        )
+        notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+        lang_switch = (
+            f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
+        )
+
+        return f"""
+        {notice_html}
+        <h3>Add stocks to your watchlist</h3>
+        <form method="GET">
+          <input type="hidden" name="token" value="{t}">
+          <input name="ticker" placeholder="e.g. NVDA" style="padding:8px;font-size:16px;">
+          <button type="submit" style="padding:8px 16px;">Add</button>
+        </form>
+        <p>Your watchlist (max {MAX_WATCHLIST_SIZE})</p>
+        {list_html}
+
+        <hr style="margin:24px 0;">
+        <h3>Time horizon</h3>
+        <form method="GET">
+          <input type="hidden" name="token" value="{t}">
+          <select name="mode" style="padding:8px;font-size:16px;">{options}</select>
+          <button type="submit" style="padding:8px 16px;">Change</button>
+        </form>
+        <p style="color:#888;font-size:12px;">Current: <strong>{preset['label']}</strong> — {preset['description']}
+        <br><span class="muted">(Time horizon names are Japanese for now; English labels are planned.)</span></p>
+
+        <hr style="margin:24px 0;">
+        <h3>Send a report now</h3>
+        <p><a href="?token={t}&report=selection">
+          <button style="padding:10px 16px;font-size:16px;width:100%;">📈 Send selection report</button></a></p>
+        <p><a href="?token={t}&report=monitoring">
+          <button style="padding:10px 16px;font-size:16px;width:100%;">📊 Send monitoring report</button></a></p>
+        <p style="color:#888;font-size:12px;">
+          You'll return to this screen right away. The email arrives within a minute or so.</p>
+
+        <hr style="margin:24px 0;">
+        <p><a href="?token={t}&info=1">How it works (Japanese only for now)</a></p>
+        <p class="muted"><a href="?token={t}&delete_account=1">Delete account (erase all your data)</a></p>
+        {lang_switch}
+        """
 
     if watchlist:
         rows = "".join(
@@ -482,7 +632,6 @@ def _render_form(token: str, notice: str = "") -> str:
         f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
         for k, p in PERIOD_PRESETS.items()
     )
-    preset = get_preset(mode)
 
     notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
 
@@ -518,6 +667,7 @@ def _render_form(token: str, notice: str = "") -> str:
     <hr style="margin:24px 0;">
     <p><a href="?token={t}&info=1">この仕組みについて（判定ロジック・データ元）</a></p>
     <p class="muted"><a href="?token={t}&delete_account=1">退会（登録データを削除）</a></p>
+    <p class="muted"><a href="?token={t}&lang=en">View in English</a></p>
     """
 
 
@@ -606,32 +756,39 @@ def _render_info(token: str) -> str:
     """
 
 
-def _handle_signup(params: dict) -> dict:
+def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
     email = (params.get("signup_email") or "").strip().lower()
     if not EMAIL_RE.match(email):
-        return _page(f"<p>メールアドレスの形式が正しくありません。</p>{_render_signup_form()}", status=400)
+        msg = "Please enter a valid email address." if lang == LANG_EN else "メールアドレスの形式が正しくありません。"
+        return _page(f"<p>{msg}</p>{_render_signup_form(lang)}", status=400)
 
     try:
         n1, n2 = int(params.get("captcha_n1", "")), int(params.get("captcha_n2", ""))
         answer = int(params.get("captcha_answer", ""))
     except (TypeError, ValueError):
-        return _page(f"<p>確認の回答が正しくありません。</p>{_render_signup_form()}", status=400)
-    if answer != n1 + n2:
-        return _page(f"<p>確認の回答が正しくありません。</p>{_render_signup_form()}", status=400)
+        answer = None
+    captcha_msg = "That answer wasn't correct, please try again." if lang == LANG_EN else "確認の回答が正しくありません。"
+    if answer is None or answer != n1 + n2:
+        return _page(f"<p>{captcha_msg}</p>{_render_signup_form(lang)}", status=400)
 
     existing = _find_token_by_email(email)
     if existing and existing.get("status") == TOKEN_STATUS_APPROVED:
         _send_confirmation_email_reminder(email, existing["token"])
-        return _page("<p>このメールアドレスは既に登録済みです。アクセス用リンクを再送しました。</p>")
+        msg = ("This email is already registered. We've resent your access link." if lang == LANG_EN
+               else "このメールアドレスは既に登録済みです。アクセス用リンクを再送しました。")
+        return _page(f"<p>{msg}</p>")
 
     token = existing["token"] if existing else secrets.token_urlsafe(24)
     table = dynamodb.Table(APPROVED_TOKENS_TABLE)
     table.put_item(Item={
         "token": token, "email": email, "status": TOKEN_STATUS_PENDING,
         "requested_at": datetime.now(timezone.utc).isoformat(),
+        "lang": lang,
     })
     _send_confirmation_email(email, token)
-    return _page("<p>確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。</p>")
+    msg = ("We've sent a confirmation email. Click the link inside to complete your registration."
+           if lang == LANG_EN else "確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。")
+    return _page(f"<p>{msg}</p>")
 
 
 def _send_confirmation_email_reminder(email: str, token: str):
@@ -697,8 +854,22 @@ def _handle_contact(params: dict) -> dict:
     )
 
 
-def _render_delete_confirm(token: str) -> str:
+def _render_delete_confirm(token: str, lang: str = LANG_JA) -> str:
     t = html.escape(token)
+    if lang == LANG_EN:
+        return f"""
+        <h3>Delete account</h3>
+        <p>The following data will be permanently deleted.
+        <strong>This cannot be undone.</strong></p>
+        <ul>
+          <li>Your registered email address</li>
+          <li>All stocks in your watchlist</li>
+          <li>Your time horizon setting</li>
+        </ul>
+        <p><a href="?token={t}&delete_account_confirm=1">
+          <button class="danger">Delete my account</button></a></p>
+        <p><a href="?token={t}">Cancel, go back</a></p>
+        """
     return f"""
     <h3>退会（登録データの削除）</h3>
     <p>以下のデータが完全に削除されます。<strong>この操作は取り消せません。</strong></p>
@@ -713,7 +884,7 @@ def _render_delete_confirm(token: str) -> str:
     """
 
 
-def _handle_delete_account(token: str) -> dict:
+def _handle_delete_account(token: str, lang: str = LANG_JA) -> dict:
     watchlist_table = dynamodb.Table(WATCHLIST_TABLE)
     for ticker in _current_watchlist(token):
         watchlist_table.delete_item(Key={"owner_token": token, "ticker": ticker})
@@ -721,6 +892,12 @@ def _handle_delete_account(token: str) -> dict:
     settings_table.delete_item(Key={"key": user_period_mode_key(token)})
     settings_table.delete_item(Key={"key": f"{token}#last_report_request"})
     dynamodb.Table(APPROVED_TOKENS_TABLE).delete_item(Key={"token": token})
+    if lang == LANG_EN:
+        return _page(
+            "<h3>Account deleted</h3>"
+            "<p>All your data has been permanently deleted. Thank you for trying PegSignal.</p>"
+            '<p>You\'re welcome back anytime. <a href="?">Home</a></p>'
+        )
     return _page(
         "<h3>退会が完了しました</h3>"
         "<p>登録データはすべて削除されました。ご利用ありがとうございました。</p>"
@@ -736,18 +913,27 @@ def _handle_confirm(token: str) -> dict:
         table = dynamodb.Table(APPROVED_TOKENS_TABLE)
         table.put_item(Item={**item, "status": TOKEN_STATUS_APPROVED,
                              "approved_at": datetime.now(timezone.utc).isoformat()})
-    return _page(_render_form(token, notice="登録が完了しました。このページのURLをブックマークしてください。"))
+    lang = _get_user_lang(item)
+    notice = ("Registration complete! Bookmark this page's URL." if lang == LANG_EN
+              else "登録が完了しました。このページのURLをブックマークしてください。")
+    return _page(_render_form(token, lang, notice=notice))
 
 
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
 
+    # 英語版(en.pegsignal.com)対応。トークンが登録済みならその利用者が保存した言語を
+    # 優先し(どちらのドメインから来ても本人の設定が優先される)、未登録の新規訪問者は
+    # アクセスしてきたドメイン(CloudFrontのX-Site-Langヘッダー)で判定する
+    token_item = _get_token_item(token) if token else None
+    lang = _get_user_lang(token_item) if token_item else _detect_request_lang(event)
+
     if params.get("confirm"):
         return _handle_confirm(token)
 
     if params.get("signup_email"):
-        return _handle_signup(params)
+        return _handle_signup(params, lang)
 
     if params.get("manifest"):
         return _handle_manifest()
@@ -773,70 +959,82 @@ def handler(event, context):
         return _page(_render_info(token))
 
     if not _is_valid_token(token):
-        return _page(_render_signup_form(), status=403 if token else 200)
+        return _page(_render_signup_form(lang), status=403 if token else 200)
+
+    # 言語の手動切替(期間モードと同じ仕組み)。メイン画面のリンクから、
+    # どちらのドメインからアクセスしていても言語を切り替えられる
+    if params.get("lang") in SUPPORTED_LANGS:
+        lang = _set_user_lang(token, params["lang"])
+        return _page(_render_form(token, lang))
 
     # 退会(登録データの自己削除)。トークンが有効な間だけ操作でき、
     # お問い合わせフォーム経由の手動対応を待たずにその場で完結する
     if params.get("delete_account_confirm"):
-        return _handle_delete_account(token)
+        return _handle_delete_account(token, lang)
 
     if params.get("delete_account"):
-        return _page(_render_delete_confirm(token))
+        return _page(_render_delete_confirm(token, lang))
 
     # 期間モードの変更
     if params.get("mode"):
         mode = set_period_mode(token, params["mode"])
         label = get_preset(mode)["label"]
-        return _page(_render_form(token, notice=f"判定期間を「{label}」に変更しました。次回のレポートから反映されます。"))
+        notice = (f'Time horizon changed to "{label}". This applies from the next report.' if lang == LANG_EN
+                  else f"判定期間を「{label}」に変更しました。次回のレポートから反映されます。")
+        return _page(_render_form(token, lang, notice=notice))
 
     # レポートの即時送信(非同期起動)
     report = (params.get("report") or "").strip().lower()
     if report in ("selection", "monitoring"):
+        label_en = "Selection" if report == "selection" else "Monitoring"
         label = "選定" if report == "selection" else "監視"
         wait = _report_cooldown_remaining(token)
         if wait > 0:
-            return _page(
-                _render_form(token, notice=f"連続でのレポート送信リクエストはできません。"
-                                           f"あと{wait}秒お待ちください。"),
-                status=429,
-            )
+            notice = (f"Please wait {wait} more seconds before requesting another report." if lang == LANG_EN
+                      else f"連続でのレポート送信リクエストはできません。あと{wait}秒お待ちください。")
+            return _page(_render_form(token, lang, notice=notice), status=429)
         try:
             _trigger_report(report, token)
         except Exception as e:
-            return _page(f"<p>{label}レポートの送信に失敗しました: {html.escape(str(e))}</p>{_back_link(token)}", status=500)
+            err_msg = (f"Failed to send the {label_en.lower()} report: {html.escape(str(e))}" if lang == LANG_EN
+                       else f"{label}レポートの送信に失敗しました: {html.escape(str(e))}")
+            return _page(f"<p>{err_msg}</p>{_back_link(token)}", status=500)
         _record_report_request(token)
-        return _page(_render_form(token, notice=f"{label}レポートの送信を受け付けました。まもなくメールが届きます。"))
+        notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email shortly." if lang == LANG_EN
+                  else f"{label}レポートの送信を受け付けました。まもなくメールが届きます。")
+        return _page(_render_form(token, lang, notice=notice))
 
     ticker = (params.get("ticker") or "").strip().upper()
     action = (params.get("action") or "register").strip().lower()
 
     if not ticker:
-        return _page(_render_form(token))
+        return _page(_render_form(token, lang))
 
     if not TICKER_RE.match(ticker):
-        return _page(f"<p>無効なティッカーです。</p>{_back_link(token)}", status=400)
+        msg = "Invalid ticker." if lang == LANG_EN else "無効なティッカーです。"
+        return _page(f"<p>{msg}</p>{_back_link(token)}", status=400)
 
     table = dynamodb.Table(WATCHLIST_TABLE)
 
     if action == "delete":
         table.delete_item(Key={"owner_token": token, "ticker": ticker})
-        return _page(_render_form(token, notice=f"{ticker} を監視リストから削除しました。"))
+        notice = (f"Removed {ticker} from your watchlist." if lang == LANG_EN
+                  else f"{ticker} を監視リストから削除しました。")
+        return _page(_render_form(token, lang, notice=notice))
 
     if not _is_known_ticker(ticker):
-        return _page(
-            _render_form(token, notice=f"「{ticker}」という銘柄は見つかりませんでした。"
-                                       f"NASDAQ100構成銘柄の中から、ティッカーを確認して"
-                                       f"もう一度お試しください。"),
-            status=400,
-        )
+        notice = (f'Couldn\'t find a ticker called "{ticker}". Please check the symbol '
+                   f"against NASDAQ100 constituents and try again." if lang == LANG_EN
+                  else f"「{ticker}」という銘柄は見つかりませんでした。"
+                       f"NASDAQ100構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
+        return _page(_render_form(token, lang, notice=notice), status=400)
 
     watchlist = _current_watchlist(token)
     if ticker not in watchlist and len(watchlist) >= MAX_WATCHLIST_SIZE:
-        return _page(
-            _render_form(token, notice=f"監視リストは上限{MAX_WATCHLIST_SIZE}件です。"
-                                       f"他の銘柄を削除してから登録してください。"),
-            status=400,
-        )
+        notice = (f"Your watchlist is limited to {MAX_WATCHLIST_SIZE} stocks. "
+                   f"Remove one before adding another." if lang == LANG_EN
+                  else f"監視リストは上限{MAX_WATCHLIST_SIZE}件です。他の銘柄を削除してから登録してください。")
+        return _page(_render_form(token, lang, notice=notice), status=400)
 
     try:
         table.put_item(
@@ -849,6 +1047,10 @@ def handler(event, context):
             ConditionExpression="attribute_not_exists(ticker)",
         )
     except dynamodb.meta.client.exceptions.ConditionalCheckFailedException:
-        return _page(_render_form(token, notice=f"{ticker} はすでに監視リストに登録済みです。"))
+        notice = (f"{ticker} is already in your watchlist." if lang == LANG_EN
+                  else f"{ticker} はすでに監視リストに登録済みです。")
+        return _page(_render_form(token, lang, notice=notice))
 
-    return _page(_render_form(token, notice=f"{ticker} を監視リストに登録しました。"))
+    notice = (f"Added {ticker} to your watchlist." if lang == LANG_EN
+              else f"{ticker} を監視リストに登録しました。")
+    return _page(_render_form(token, lang, notice=notice))
