@@ -49,8 +49,11 @@ def rh():
     return module
 
 
-def _event(**params):
-    return {"queryStringParameters": {k: v for k, v in params.items() if v is not None}}
+def _event(_headers=None, **params):
+    event = {"queryStringParameters": {k: v for k, v in params.items() if v is not None}}
+    if _headers:
+        event["headers"] = _headers
+    return event
 
 
 class TestAuth:
@@ -181,6 +184,79 @@ class TestAccessRecoveryHint:
         r = rh.handler(_event(), None)
         assert r["statusCode"] == 200
         assert "アクセス用リンクを再送します" in r["body"]
+
+
+class TestLanguage:
+    def test_signup_form_defaults_to_japanese_without_header(self, rh):
+        r = rh.handler(_event(), None)
+        assert r["statusCode"] == 200
+        assert "お申込み" in r["body"]
+
+    def test_signup_form_is_english_when_site_lang_header_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        assert r["statusCode"] == 200
+        assert "Sign up" in r["body"]
+        assert "お申込み" not in r["body"]
+
+    def test_unrecognized_site_lang_header_falls_back_to_japanese(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "fr"}), None)
+        assert r["statusCode"] == 200
+        assert "お申込み" in r["body"]
+
+    def test_signup_stores_lang_from_header_on_new_registration(self, rh):
+        rh.handler(_event(
+            _headers={"x-site-lang": "en"}, signup_email="new@example.com",
+            captcha_n1="2", captcha_n2="3", captcha_answer="5",
+        ), None)
+        item = None
+        for v in rh.dynamodb.Table("approved_tokens")._items.values():
+            if v.get("email") == "new@example.com":
+                item = v
+        assert item is not None
+        assert item["lang"] == "en"
+
+    def test_main_form_renders_in_stored_language_regardless_of_current_header(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": VALID_TOKEN, "email": "user@example.com",
+                  "status": "approved", "lang": "en"})
+        # ヘッダーが日本語版ドメインでも、本人の保存済み設定(en)が優先される
+        r = rh.handler(_event(_headers={"x-site-lang": "ja"}, token=VALID_TOKEN), None)
+        assert r["statusCode"] == 200
+        assert "Add stocks to your watchlist" in r["body"]
+
+    def test_lang_toggle_updates_stored_preference(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        assert r["statusCode"] == 200
+        assert "Add stocks to your watchlist" in r["body"]
+        item = rh.dynamodb.Table("approved_tokens").get_item(Key={"token": VALID_TOKEN})["Item"]
+        assert item["lang"] == "en"
+
+        # 明示的な切替はドメインをまたいでも本人の設定として持続する
+        r2 = rh.handler(_event(token=VALID_TOKEN), None)
+        assert "Add stocks to your watchlist" in r2["body"]
+
+        # 日本語に戻すことも同じ仕組みでできる
+        r3 = rh.handler(_event(token=VALID_TOKEN, lang="ja"), None)
+        assert "銘柄を監視リストに登録" in r3["body"]
+
+    def test_english_notices_for_ticker_actions(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
+        assert "Added NVDA to your watchlist." in r["body"]
+
+    def test_footer_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        assert "About" in r["body"] and "Contact" in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_footer_is_japanese_by_default(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN), None)
+        assert "運営者情報" in r["body"]
+
+    def test_period_dropdown_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        assert "Mid-term" in r["body"]
+        assert "中期" not in r["body"]
 
 
 class TestTickerRegistration:

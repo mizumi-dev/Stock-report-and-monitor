@@ -74,8 +74,12 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
 
 
 def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
-                            skipped: list[str] | None = None) -> str:
-    """監視（売買判断）レポート・日次。各要素は {ticker, price, prev_close, signals, prev_signals}"""
+                            skipped: list[str] | None = None,
+                            register_base_url: str | None = None,
+                            register_token: str | None = None) -> str:
+    """監視（売買判断）レポート・日次。各要素は {ticker, price, prev_close, signals, prev_signals}。
+    register_base_url/register_tokenを渡すと、登録ページへのリンクを末尾に付ける
+    (銘柄追加・削除は登録ページ側で行うため、ここから迷わず辿れるようにする)"""
     increased = []
     warnings = []
     for r in watchlist_results:
@@ -129,6 +133,13 @@ def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
             f'（上場から日が浅い可能性があります）: {", ".join(skipped)}</p>'
         )
 
+    register_link = ""
+    if register_base_url and register_token:
+        register_link = (
+            f'<p><a href="{register_base_url}?token={register_token}">'
+            f"銘柄を追加・削除する（登録ページを開く） →</a></p>"
+        )
+
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <h2>📊 本日の監視レポート</h2>
@@ -136,6 +147,7 @@ def build_monitoring_report(watchlist_results: list[dict], mode_label: str = "",
       <p>🔎 サマリー<br>{summary}</p>
       {''.join(blocks)}
       {skipped_note}
+      {register_link}
       <p style="color:#888;font-size:12px;">{DISCLAIMER}</p>
     </body></html>
     """
