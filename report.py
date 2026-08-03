@@ -9,6 +9,55 @@ def _signal_dot(flag: bool) -> str:
     return "●" if flag else "○"
 
 
+SIGNAL_LEGEND = (
+    '<p style="color:#888;font-size:12px;">'
+    "シグナルの見方: 「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
+    "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
+    "この選定は<strong>PEG(株価に対する利益成長率の割安度)を基準にランキング</strong>したもので、"
+    "シグナルは現在の値動きの状態を補足する参考情報です。"
+    "トレンドが既に下向き(デッドクロス)の銘柄は、割安に見えても値動きが弱い可能性があるため"
+    "注意してください。</p>"
+)
+
+
+def _trend_text(detail: dict | None) -> str:
+    """トレンドシグナルの状態を文言化する。
+    buy_trendは「直近でゴールデンクロスした」か「既に上昇順に並んでいる(継続中)」かを
+    区別せずTrueにしていたため、クロスからかなり時間が経っていても「クロス発生」のように
+    見えてしまう問題があった。ここで両者を明示的に分けて伝える。"""
+    detail = detail or {}
+    if detail.get("sell_cross"):
+        return "🔴 デッドクロス発生(下降転換)"
+    if detail.get("sell_alignment"):
+        return "🔴 下降トレンド継続中"
+    if detail.get("buy_cross"):
+        return "🟢 ゴールデンクロス発生(直近)"
+    if detail.get("buy_alignment"):
+        return "🟢 上昇トレンド継続中(直近のクロスではありません)"
+    return "⚪ 明確なトレンドなし"
+
+
+def _momentum_text(sig: dict) -> str:
+    if sig.get("sell_momentum"):
+        return f"🔴 買われすぎ(RSI {sig.get('rsi', '―')})"
+    if sig.get("buy_momentum"):
+        return f"🟢 売られすぎ・押し目の可能性(RSI {sig.get('rsi', '―')})"
+    return f"⚪ 中立(RSI {sig.get('rsi', '―')})"
+
+
+def _signal_summary_html(sig: dict) -> str:
+    trend = _trend_text(sig.get("trend_detail"))
+    momentum = _momentum_text(sig)
+    volume = "🟢 急増" if sig.get("volume_high") else "⚪ 平常"
+    return (
+        '<table style="border-collapse:collapse;font-size:13px;">'
+        f'<tr><td style="padding:2px 8px;">トレンド</td><td style="padding:2px 8px;">{trend}</td></tr>'
+        f'<tr><td style="padding:2px 8px;">モメンタム</td><td style="padding:2px 8px;">{momentum}</td></tr>'
+        f'<tr><td style="padding:2px 8px;">出来高</td><td style="padding:2px 8px;">{volume}</td></tr>'
+        "</table>"
+    )
+
+
 def _broker_links(ticker: str) -> str:
     """レポートを見てすぐ行動に移せるよう、証券会社の銘柄ページへのリンクを添える。
     tickerは登録時にTICKER_RE(英大文字・数字1〜6文字)で検証済みのため、
@@ -47,20 +96,16 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
         cards = []
         for i, s in enumerate(ranked, 1):
             sig = signals_map.get(s["ticker"], {})
-            lamps = "".join(
-                "🟢" if sig.get(k) else "⚪"
-                for k in ("buy_trend", "buy_momentum", "volume_high")
-            )
             cards.append(f"""
             <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
               <p style="margin:4px 0;"><strong>【第{i}位】{s['ticker']} — {s.get('company_name','')}</strong></p>
               <p style="margin:4px 0;">PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%</p>
-              <p style="margin:4px 0;">シグナル: {lamps}</p>
+              {_signal_summary_html(sig)}
               <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
               {_broker_links(s['ticker'])}
             </div>
             """)
-        body_rows = f"<p>🔎 サマリー<br>{summary}</p>" + "".join(cards)
+        body_rows = f"<p>🔎 サマリー<br>{summary}</p>" + SIGNAL_LEGEND + "".join(cards)
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
