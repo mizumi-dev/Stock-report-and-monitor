@@ -131,7 +131,7 @@ def test_selection_report_defaults_to_japanese_when_lang_omitted():
     signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
                             "trend_detail": {"buy_cross": True}}}
     body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
-    assert "今週の買い時レポート" in body
+    assert "今週のPEGスクリーニング結果" in body
     assert 'href="https://www.moomoo.com/ja/stock/NVDA-US"' in body
 
 
@@ -141,8 +141,8 @@ def test_selection_report_is_english_when_lang_is_en():
                             "trend_detail": {"buy_cross": True}}}
     body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
 
-    assert "This week's buy-time picks" in body
-    assert "今週の買い時レポート" not in body
+    assert "This week's PEG screening results" in body
+    assert "今週のPEGスクリーニング結果" not in body
     # 米国口座数ランキング上位のうち、ログイン不要で個別銘柄ページへ直接リンクできる
     # Fidelity・Robinhoodを採用(Schwab/Vanguardは非対応、TODO.md参照)
     assert 'href="https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=NVDA"' in body

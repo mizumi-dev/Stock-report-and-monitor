@@ -263,7 +263,7 @@ def run_selection_reports(users: list[dict]):
             lang = u.get("lang") or "ja"
             body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode,
                                           lang=lang, as_of=_today_str())
-            subject = "📈 This week's buy-time picks" if lang == "en" else "📈 今週の買い時レポート"
+            subject = "📈 This week's PEG screening results" if lang == "en" else "📈 今週のPEGスクリーニング結果"
             send_email(subject, body, u["email"])
 
 
@@ -282,7 +282,7 @@ def send_selection_report_now(user: dict):
 
     lang = user.get("lang") or "ja"
     body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang, as_of=as_of)
-    subject = "📈 This week's buy-time picks" if lang == "en" else "📈 今週の買い時レポート"
+    subject = "📈 This week's PEG screening results" if lang == "en" else "📈 今週のPEGスクリーニング結果"
     send_email(subject, body, user["email"])
 
 

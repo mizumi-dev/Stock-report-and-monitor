@@ -30,7 +30,7 @@ T = {
         ),
     },
     "summary_label": {LANG_JA: "🔎 サマリー", LANG_EN: "🔎 Summary"},
-    "selection_heading": {LANG_JA: "📈 今週の買い時レポート", LANG_EN: "📈 This week's buy-time picks"},
+    "selection_heading": {LANG_JA: "📈 今週のPEGスクリーニング結果", LANG_EN: "📈 This week's PEG screening results"},
     "monitoring_heading": {LANG_JA: "📊 本日の監視レポート", LANG_EN: "📊 Today's monitoring report"},
     "no_candidates": {LANG_JA: "本日、足切り条件を通過した銘柄はありませんでした。",
                        LANG_EN: "No stocks passed the screening criteria today."},
@@ -43,8 +43,8 @@ T = {
     "col_trend": {LANG_JA: "トレンド", LANG_EN: "Trend"},
     "col_momentum": {LANG_JA: "モメンタム", LANG_EN: "Momentum"},
     "col_volume": {LANG_JA: "出来高", LANG_EN: "Volume"},
-    "row_buy": {LANG_JA: "🟢買い", LANG_EN: "🟢 Buy"},
-    "row_sell": {LANG_JA: "🔴売り", LANG_EN: "🔴 Sell"},
+    "row_buy": {LANG_JA: "🟢買いシグナル", LANG_EN: "🟢 Buy signal"},
+    "row_sell": {LANG_JA: "🔴売りシグナル", LANG_EN: "🔴 Sell signal"},
     "volume_high": {LANG_JA: "急増", LANG_EN: "Spiking"},
     "volume_normal": {LANG_JA: "平常", LANG_EN: "Normal"},
     "no_warnings": {LANG_JA: "なし", LANG_EN: "None"},
@@ -133,8 +133,8 @@ def _momentum_text(sig: dict, lang: str) -> str:
     if sig.get("sell_momentum"):
         return f"🔴 買われすぎ(RSI {rsi})" if lang == LANG_JA else f"🔴 Overbought (RSI {rsi})"
     if sig.get("buy_momentum"):
-        return (f"🟢 売られすぎ・押し目の可能性(RSI {rsi})" if lang == LANG_JA
-                else f"🟢 Oversold, possible dip (RSI {rsi})")
+        return (f"🟢 売られすぎ水準(RSI {rsi})" if lang == LANG_JA
+                else f"🟢 Oversold level (RSI {rsi})")
     return f"⚪ 中立(RSI {rsi})" if lang == LANG_JA else f"⚪ Neutral (RSI {rsi})"
 
 
@@ -196,7 +196,7 @@ def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = L
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
                            register_token: str, mode: str = "", lang: str = LANG_JA,
                            as_of: str | None = None) -> str:
-    """選定（買い時）レポート・週次。as_ofを渡すと「◯月◯日時点のデータです」の
+    """選定（PEGスクリーニング）レポート・週次。as_ofを渡すと「◯月◯日時点のデータです」の
     注記を末尾に付ける(レポート即時発行ボタンが保存済みスナップショットを送る際に使う)。"""
     register_form_url = f"{register_base_url}?token={register_token}"
 
