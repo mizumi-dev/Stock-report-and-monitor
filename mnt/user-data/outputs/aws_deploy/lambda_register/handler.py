@@ -61,27 +61,8 @@ LANG_JA = "ja"
 LANG_EN = "en"
 SUPPORTED_LANGS = (LANG_JA, LANG_EN)
 
-# config.py の PERIOD_PRESETS (ラベル・説明文) はdaily-batchとも共有しているため、
-# 英訳はここに閉じたローカルの対訳表として持つ(共有側に手を入れると影響範囲が広がるため)
-_PERIOD_PRESET_LABELS_EN = {
-    "SHORT": {"label": "Short-term",
-              "description": "Reacts fast to price moves. More signals, but more false ones too."},
-    "MID": {"label": "Mid-term",
-            "description": "Standard daily-swing setup, filtered by the 200-day average."},
-    "LONG": {"label": "Long-term",
-             "description": "Tracks broad trend reversals via the 50/200-day cross. Fires a few times a year."},
-}
-
-_CYCLE_LABEL_EN = {
-    "day": "today's value",
-    "week": "average over last calendar week's trading days",
-    "month": "average over last calendar month's trading days",
-}
-_SEND_FREQ_LABEL_EN = {
-    "SHORT": "Daily (weekdays)",
-    "MID": "Every Monday",
-    "LONG": "First Monday of the month (monthly)",
-}
+# config.py の PERIOD_PRESETS には label_en/description_en が入っているため、英訳の
+# 単一の情報源としてそちらを参照する(このファイルではラベル・説明文を複製しない)
 
 
 def _detect_request_lang(event) -> str:
@@ -98,11 +79,13 @@ def _get_user_lang(token_item: dict | None) -> str:
     return lang if lang in SUPPORTED_LANGS else LANG_JA
 
 
-def _set_user_lang(token: str, lang: str) -> str:
+def _set_user_lang(token: str, lang: str, token_item: dict | None = None) -> str:
+    """token_itemを渡せば、呼び出し側が既に取得済みのDynamoDB読み取り結果を再利用できる
+    (handler()内では既にtoken_itemを取得済みのため、二重読み取りを避ける)。"""
     lang = lang if lang in SUPPORTED_LANGS else LANG_JA
-    table = dynamodb.Table(APPROVED_TOKENS_TABLE)
-    item = _get_token_item(token)
+    item = token_item if token_item is not None else _get_token_item(token)
     if item:
+        table = dynamodb.Table(APPROVED_TOKENS_TABLE)
         table.put_item(Item={**item, "lang": lang})
     return lang
 
@@ -258,11 +241,6 @@ def _get_token_item(token: str) -> dict | None:
     table = dynamodb.Table(APPROVED_TOKENS_TABLE)
     resp = table.get_item(Key={"token": token})
     return resp.get("Item")
-
-
-def _is_valid_token(token: str) -> bool:
-    item = _get_token_item(token)
-    return bool(item) and item.get("status") == TOKEN_STATUS_APPROVED
 
 
 def _find_token_by_email(email: str) -> dict | None:
@@ -696,10 +674,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
             list_html = f"<p>{empty_watchlist}</p>"
 
         options = "".join(
-            f'<option value="{k}"{" selected" if k == mode else ""}>{_PERIOD_PRESET_LABELS_EN[k]["label"]}</option>'
+            f'<option value="{k}"{" selected" if k == mode else ""}>{PERIOD_PRESETS[k]["label_en"]}</option>'
             for k in PERIOD_PRESETS
         )
-        preset_en = _PERIOD_PRESET_LABELS_EN[mode]
+        preset_en = PERIOD_PRESETS[mode]
         notice_html = f'<p class="notice">{notice}</p>' if notice else ""
         lang_switch = (
             f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
@@ -723,7 +701,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           <select name="mode" style="padding:8px;font-size:16px;">{options}</select>
           <button type="submit" style="padding:8px 16px;">Change</button>
         </form>
-        <p style="color:#888;font-size:12px;">Current: <strong>{preset_en['label']}</strong> — {preset_en['description']}</p>
+        <p style="color:#888;font-size:12px;">Current: <strong>{preset_en['label_en']}</strong> — {preset_en['description_en']}</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -794,14 +772,14 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
 
 
 _CYCLE_LABEL = {
-    "day": "当日の値",
-    "week": "前の暦週の取引日平均",
-    "month": "前の暦月の取引日平均",
+    "day": {"ja": "当日の値", "en": "today's value"},
+    "week": {"ja": "前の暦週の取引日平均", "en": "average over last calendar week's trading days"},
+    "month": {"ja": "前の暦月の取引日平均", "en": "average over last calendar month's trading days"},
 }
 _SEND_FREQ_LABEL = {
-    "SHORT": "毎日（平日）",
-    "MID": "毎週月曜",
-    "LONG": "月初の月曜（月1回）",
+    "SHORT": {"ja": "毎日（平日）", "en": "Daily (weekdays)"},
+    "MID": {"ja": "毎週月曜", "en": "Every Monday"},
+    "LONG": {"ja": "月初の月曜（月1回）", "en": "First Monday of the month (monthly)"},
 }
 
 
@@ -816,12 +794,12 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
             mark = " ←current" if key == mode else ""
             filt = f" / filtered by the {p['ma_filter']}-day line" if p["ma_filter"] else ""
             rows_en.append(
-                f"<tr><td style='padding:4px 8px;'><strong>{_PERIOD_PRESET_LABELS_EN[key]['label']}{mark}</strong></td>"
+                f"<tr><td style='padding:4px 8px;'><strong>{p['label_en']}{mark}</strong></td>"
                 f"<td style='padding:4px 8px;'>{p['ma_short']}-day × {p['ma_long']}-day{filt}</td>"
                 f"<td style='padding:4px 8px;'>RSI{p['rsi_period']}<br>"
                 f"buy at or below {p['rsi_oversold']} / sell at or above {p['rsi_overbought']}<br>"
-                f"(judged on {_CYCLE_LABEL_EN[p['cycle_unit']]})</td>"
-                f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL_EN[key]}</td></tr>"
+                f"(judged on {_CYCLE_LABEL[p['cycle_unit']]['en']})</td>"
+                f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL[key]['en']}</td></tr>"
             )
         table_en = (
             "<table style='border-collapse:collapse;font-size:13px;'>"
@@ -871,7 +849,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
         </details>
 
         <details>
-          <summary>⚙️ Settings by time horizon (current: {_PERIOD_PRESET_LABELS_EN[mode]['label']})</summary>
+          <summary>⚙️ Settings by time horizon (current: {PERIOD_PRESETS[mode]['label_en']})</summary>
           {table_en}
           <p class="muted">Short-term reacts faster but has more false signals; long-term fires
           less often. Going a while without a signal is normal in long-term mode.</p>
@@ -889,8 +867,8 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
             f"<td style='padding:4px 8px;'>{p['ma_short']}日線 × {p['ma_long']}日線{filt}</td>"
             f"<td style='padding:4px 8px;'>RSI{p['rsi_period']}<br>"
             f"{p['rsi_oversold']}以下で買い / {p['rsi_overbought']}以上で売り<br>"
-            f"({_CYCLE_LABEL[p['cycle_unit']]}で判定)</td>"
-            f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL[key]}</td></tr>"
+            f"({_CYCLE_LABEL[p['cycle_unit']]['ja']}で判定)</td>"
+            f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL[key]['ja']}</td></tr>"
         )
     table = (
         "<table style='border-collapse:collapse;font-size:13px;'>"
@@ -1124,8 +1102,9 @@ def _handle_delete_account(token: str, lang: str = LANG_JA) -> dict:
     )
 
 
-def _handle_confirm(token: str) -> dict:
-    item = _get_token_item(token)
+def _handle_confirm(token: str, token_item: dict | None = None) -> dict:
+    """token_itemを渡せば、handler()側で既に取得済みのDynamoDB読み取り結果を再利用できる。"""
+    item = token_item if token_item is not None else _get_token_item(token)
     if not item:
         return _page("<p>無効なリンクです。</p>", status=404)
     if item.get("status") == TOKEN_STATUS_PENDING:
@@ -1149,7 +1128,7 @@ def handler(event, context):
     lang = _get_user_lang(token_item) if token_item else _detect_request_lang(event)
 
     if params.get("confirm"):
-        return _handle_confirm(token)
+        return _handle_confirm(token, token_item)
 
     if params.get("signup_email"):
         return _handle_signup(params, lang)
@@ -1177,13 +1156,13 @@ def handler(event, context):
         # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
         return _page(_render_info(token, lang), lang=lang)
 
-    if not _is_valid_token(token):
+    if not (token_item and token_item.get("status") == TOKEN_STATUS_APPROVED):
         return _page(_render_signup_form(lang), status=403 if token else 200, lang=lang)
 
     # 言語の手動切替(期間モードと同じ仕組み)。メイン画面のリンクから、
     # どちらのドメインからアクセスしていても言語を切り替えられる
     if params.get("lang") in SUPPORTED_LANGS:
-        lang = _set_user_lang(token, params["lang"])
+        lang = _set_user_lang(token, params["lang"], token_item)
         return _page(_render_form(token, lang), lang=lang)
 
     # 退会(登録データの自己削除)。トークンが有効な間だけ操作でき、
