@@ -100,6 +100,26 @@ TODO#13で実装した`_is_known_ticker()`のコードは`register-stock`に正�
     `deploy_patch_ja_lang_header.sh`はコード用意済みだが未実行、AWS権限が必要)
 - テスト16件追加、既存分と合わせて58件全てpass
 
+### 英語ページ翻訳の続き（2026-08-03、着手）
+
+上記「未翻訳」のうち、静的ページ4種+説明ページ+確認メール類を対応。
+
+- **対応済み**: `?about=1`・`?contact=1`・`?privacy=1`・`?terms=1`・`?info=1`の全ページに
+  `lang`引数を追加し英訳版を実装。`_render_info()`は`config.py`の実際の設定値から表を
+  動的生成する構造だったため、英語ラベル対訳表(`_CYCLE_LABEL_EN`・`_SEND_FREQ_LABEL_EN`)を
+  追加してJA版と同じロジックを再利用
+- **対応済み**: `_handle_contact()`のバリデーション・完了メッセージを`lang`で出し分け。
+  問い合わせメール本文にも言語設定を記載（サポート時の参考情報として）
+- **対応済み**: `_send_confirmation_email()`・`_send_confirmation_email_reminder()`に
+  `lang`引数を追加し件名・本文を英訳。再登録時のリマインダーメールは、その場のリクエスト言語
+  ではなく**登録済み利用者本人の保存済み言語設定**(`_get_user_lang(existing)`)を使うようにした
+  （別ドメインから再登録を試みても、本人が選んだ言語でメールが届くようにするため）
+- **対応済み**: 各所に残っていた「(Japanese only for now)」という古い注記を、実際に翻訳が
+  完了したページ(info/privacy/terms)へのリンクから削除
+- テスト13件追加（`TestInfoPagesLanguage`・`TestSignup`拡張）、全75件pass
+- **残る未翻訳**: daily-batchのレポート本文(`report.py`)自体の英訳、米国向け証券リンク、
+  `en.pegsignal.com`のインフラ実デプロイ（AWS権限が必要、別途依頼予定）
+
 ## 選定レポートの内容改善（2026-08-03）
 
 実地確認で「シグナルが何を示すか分からなかった」との指摘。原因は選定レポートの

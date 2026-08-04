@@ -72,6 +72,17 @@ _PERIOD_PRESET_LABELS_EN = {
              "description": "Tracks broad trend reversals via the 50/200-day cross. Fires a few times a year."},
 }
 
+_CYCLE_LABEL_EN = {
+    "day": "today's value",
+    "week": "average over last calendar week's trading days",
+    "month": "average over last calendar month's trading days",
+}
+_SEND_FREQ_LABEL_EN = {
+    "SHORT": "Daily (weekdays)",
+    "MID": "Every Monday",
+    "LONG": "First Monday of the month (monthly)",
+}
+
 
 def _detect_request_lang(event) -> str:
     """トークンを持たない新規訪問者(申込みフォーム)向け。
@@ -187,12 +198,9 @@ details p:last-child{margin-bottom:0;}
 
 def _page(inner_html: str, status=200, lang: str = LANG_JA):
     if lang == LANG_EN:
-        # 遷移先(about/contact/privacy/terms)自体はまだ日本語のみ(TODO.md参照)だが、
-        # フッターのナビゲーション自体は英語で読めるようにしておく
         footer = (
             '<a href="?about=1">About</a> ・ <a href="?contact=1">Contact</a> ・ '
             '<a href="?privacy=1">Privacy Policy</a> ・ <a href="?terms=1">Terms</a>'
-            ' <span class="muted">(Japanese only for now)</span>'
         )
     else:
         footer = (
@@ -268,18 +276,27 @@ def _find_token_by_email(email: str) -> dict | None:
     return None
 
 
-def _send_confirmation_email(email: str, token: str):
+def _send_confirmation_email(email: str, token: str, lang: str = LANG_JA):
     link = f"{REGISTER_FUNCTION_URL}?token={token}&confirm=1"
-    body = f"""
-    <p>お申込みありがとうございます。以下のリンクをクリックすると登録が完了します。</p>
-    <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
-    <p>心当たりがない場合はこのメールを破棄してください。</p>
-    """
+    if lang == LANG_EN:
+        subject = "[Confirm your registration] PegSignal sign-up"
+        body = f"""
+        <p>Thanks for signing up. Click the link below to complete your registration.</p>
+        <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+        <p>If you didn't request this, please disregard this email.</p>
+        """
+    else:
+        subject = "【登録確認】株式レポートサービスのお申込み"
+        body = f"""
+        <p>お申込みありがとうございます。以下のリンクをクリックすると登録が完了します。</p>
+        <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+        <p>心当たりがない場合はこのメールを破棄してください。</p>
+        """
     ses.send_email(
         Source=SES_SENDER,
         Destination={"ToAddresses": [email]},
         Message={
-            "Subject": {"Data": "【登録確認】株式レポートサービスのお申込み", "Charset": "UTF-8"},
+            "Subject": {"Data": subject, "Charset": "UTF-8"},
             "Body": {"Html": {"Data": body, "Charset": "UTF-8"}},
         },
     )
@@ -406,7 +423,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
           we monitor trend, momentum, and volume signals daily.</p>
           <p class="muted">Not investment advice. Data comes from Yahoo Finance; we don't
           guarantee its accuracy or timeliness. See <a href="?info=1">how it works</a>
-          (Japanese only for now) for details.</p>
+          for details.</p>
         </details>
 
         <h3>Sign up</h3>
@@ -423,7 +440,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         </form>
         <p class="muted">
           By signing up you agree to our <a href="?terms=1">Terms</a> and
-          <a href="?privacy=1">Privacy Policy</a> (Japanese only for now).</p>
+          <a href="?privacy=1">Privacy Policy</a>.</p>
         <p class="muted">Already signed up? Use your existing access link.
         <strong>If you lost it, sign up again with the same email address above
         and we'll resend it.</strong></p>
@@ -488,7 +505,28 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     """
 
 
-def _render_privacy() -> str:
+def _render_privacy(lang: str = LANG_JA) -> str:
+    if lang == LANG_EN:
+        return """
+        <h3>Privacy Policy</h3>
+        <p>We collect only <strong>your email address, registered tickers, and time horizon
+        selection</strong>. We never collect payment details, your name or address, IP address
+        logs, or cookie-based tracking. We never share or sell your personal data to third
+        parties.</p>
+        <p>Data is stored in AWS's managed database (DynamoDB); nobody without your invite token
+        can access it. That said, this is a personal project and has not undergone a large-scale
+        security audit. No passwords or other sensitive credentials are required — your email
+        address alone is enough to use the service.</p>
+        <p>We may show non-personalized ads or affiliate links on the site in the future, but
+        even then we will not deliver ads that identify or track individuals.</p>
+        <p>This service is intended for residents of Japan and the United States.
+        <strong>Residents of the EEA, UK, and Switzerland are not supported.</strong></p>
+        <p>You can delete your registration data <strong>yourself, instantly, at any time</strong>
+        via your access link ("Delete account" on the main screen). If you've lost your access
+        link or have another disclosure request, please reach us via the
+        <a href="?contact=1">contact form</a>.</p>
+        <p><a href="?">Back</a></p>
+        """
     return """
     <h3>プライバシーポリシー</h3>
     <p>収集する情報は<strong>メールアドレス・登録銘柄・判定期間モードの選択のみ</strong>です。
@@ -509,7 +547,23 @@ def _render_privacy() -> str:
     """
 
 
-def _render_terms() -> str:
+def _render_terms(lang: str = LANG_JA) -> str:
+    if lang == LANG_EN:
+        return """
+        <h3>Terms of Service</h3>
+        <p><strong>The reports and signals this service sends are not investment advice.</strong>
+        Information is based on external data (such as Yahoo Finance) and we do not guarantee its
+        accuracy or completeness. You are responsible for your own investment decisions.</p>
+        <p>This is a free service intended for residents of Japan and the United States.
+        <strong>Residents of the EEA, UK, and Switzerland are not supported.</strong></p>
+        <p>Please keep your invite token (access link) to yourself. If we find evidence of abuse
+        or excessive automated access, we may suspend your account without prior notice.</p>
+        <p>The operator may change or discontinue features at their discretion, without prior
+        notice.</p>
+        <p>See also our <a href="?privacy=1">Privacy Policy</a> and
+        <a href="?about=1">About</a> page. Contact us <a href="?contact=1">here</a>.</p>
+        <p><a href="?">Back</a></p>
+        """
     return """
     <h3>利用規約</h3>
     <p><strong>本サービスが配信するレポート・シグナルは投資助言ではありません。</strong>
@@ -526,7 +580,28 @@ def _render_terms() -> str:
     """
 
 
-def _render_about() -> str:
+def _render_about(lang: str = LANG_JA) -> str:
+    if lang == LANG_EN:
+        return """
+        <h3>About</h3>
+        <p>PegSignal is <strong>developed and operated by a single individual</strong>, not a
+        company. Planning, development, and operations are all handled by one person.</p>
+        <p>It's a free service that picks undervalued growth stocks from the NASDAQ100
+        constituents by PEG ratio and emails you signals. See
+        <a href="?info=1">how it works</a> for the logic details.</p>
+
+        <h4>How we handle your email address</h4>
+        <p>Your registered email address is used <strong>only to send reports and login
+        links</strong>. We never share it with third parties for advertising or marketing
+        purposes. See the <a href="?privacy=1">Privacy Policy</a> for storage and deletion
+        details.</p>
+
+        <h4>Contact</h4>
+        <p>For questions or requests, please use the <a href="?contact=1">contact form</a>.
+        Deleting your account doesn't require contacting us — if you have your access link, you
+        can do it yourself instantly.</p>
+        <p><a href="?">Back to top</a></p>
+        """
     return """
     <h3>運営者情報</h3>
     <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
@@ -548,9 +623,34 @@ def _render_about() -> str:
     """
 
 
-def _render_contact_form(notice: str = "") -> str:
+def _render_contact_form(lang: str = LANG_JA, notice: str = "") -> str:
     n1, n2 = random.randint(1, 9), random.randint(1, 9)
     notice_html = f'<p class="notice">{notice}</p>' if notice else ""
+    if lang == LANG_EN:
+        return f"""
+        {notice_html}
+        <h3>Contact</h3>
+        <p>Send your question or request using the form below. Please include a reply email
+        address so we can get back to you.</p>
+        <p class="muted">If you want to delete your account, you don't need to contact us — with
+        your access link, use "Delete account" on the main screen to remove it yourself
+        instantly.</p>
+        <form method="GET">
+          <input type="hidden" name="contact_submit" value="1">
+          <label>Reply email address
+            <input name="contact_email" type="email" placeholder="example@example.com"
+                   style="width:100%;" required>
+          </label>
+          <label>Message
+            <textarea name="contact_message" rows="5" style="width:100%;" required></textarea>
+          </label>
+          <p>Quick check: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
+          <input type="hidden" name="captcha_n1" value="{n1}">
+          <input type="hidden" name="captcha_n2" value="{n2}">
+          <button type="submit">Send</button>
+        </form>
+        <p><a href="?">Back to top</a></p>
+        """
     return f"""
     {notice_html}
     <h3>お問い合わせ</h3>
@@ -635,7 +735,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           You'll return to this screen right away. The email arrives within a minute or so.</p>
 
         <hr style="margin:24px 0;">
-        <p><a href="?token={t}&info=1">How it works (Japanese only for now)</a></p>
+        <p><a href="?token={t}&info=1">How it works</a></p>
         <p class="muted"><a href="?token={t}&delete_account=1">Delete account (erase all your data)</a></p>
         {lang_switch}
         """
@@ -705,10 +805,80 @@ _SEND_FREQ_LABEL = {
 }
 
 
-def _render_info(token: str) -> str:
+def _render_info(token: str, lang: str = LANG_JA) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
     mode = get_period_mode(token)
+
+    if lang == LANG_EN:
+        rows_en = []
+        for key, p in PERIOD_PRESETS.items():
+            mark = " ←current" if key == mode else ""
+            filt = f" / filtered by the {p['ma_filter']}-day line" if p["ma_filter"] else ""
+            rows_en.append(
+                f"<tr><td style='padding:4px 8px;'><strong>{_PERIOD_PRESET_LABELS_EN[key]['label']}{mark}</strong></td>"
+                f"<td style='padding:4px 8px;'>{p['ma_short']}-day × {p['ma_long']}-day{filt}</td>"
+                f"<td style='padding:4px 8px;'>RSI{p['rsi_period']}<br>"
+                f"buy at or below {p['rsi_oversold']} / sell at or above {p['rsi_overbought']}<br>"
+                f"(judged on {_CYCLE_LABEL_EN[p['cycle_unit']]})</td>"
+                f"<td style='padding:4px 8px;'>{_SEND_FREQ_LABEL_EN[key]}</td></tr>"
+            )
+        table_en = (
+            "<table style='border-collapse:collapse;font-size:13px;'>"
+            "<tr><th style='padding:4px 8px;'>Mode</th><th style='padding:4px 8px;'>Trend</th>"
+            "<th style='padding:4px 8px;'>Momentum</th><th style='padding:4px 8px;'>Selection report frequency</th></tr>"
+            + "".join(rows_en) + "</table>"
+        )
+        return f"""
+        <h3>How this service works</h3>
+        <p class="muted">The 🟢/⚪ lamps just show whether each individual signal is on — they are
+        not a combined score across multiple conditions. This is not investment advice, and it
+        relies on values provided by Yahoo Finance, so accuracy and timeliness are not
+        guaranteed.</p>
+
+        <details open>
+          <summary>📈 Selection report — auto-picks undervalued growth stocks by PEG ratio</summary>
+          <p>Universe: NASDAQ100 constituents (fetched from NASDAQ's official API). Only stocks
+          meeting both conditions below become candidates, and the top ones are sent ranked by
+          PEG ascending (ties broken by larger market cap first).</p>
+          <ul>
+            <li>Earnings growth rate at or above {MIN_GROWTH * 100:.0f}%</li>
+            <li>PEG ratio greater than 0 and at or below {MAX_PEG}</li>
+          </ul>
+          <p class="muted">PEG, earnings growth, market cap, and price all come from
+          <strong>Yahoo Finance (the yfinance library)</strong>. PEG is "P/E ratio ÷ earnings
+          growth rate" — lower means more undervalued relative to growth. We don't recalculate it
+          ourselves. Send frequency depends on the mode (short-term = daily, mid-term = every
+          Monday, long-term = first Monday of the month).</p>
+          <p class="muted">Delivery timing: before the US market opens (6:00am US Eastern Time),
+          using data through the previous trading day. On Mondays, since no new trading data
+          exists over the weekend, this naturally becomes data through the prior Friday.</p>
+        </details>
+
+        <details>
+          <summary>📊 Monitoring report — daily trend/momentum/volume checks on your watchlist</summary>
+          <p><strong>Trend</strong> lights up when either of these happens:
+          a <strong>cross</strong> (the short moving average crosses above/below the long one
+          "on that day"), or <strong>alignment</strong> (price and each moving average line up
+          cleanly from highest to lowest). All modes use daily data for this judgment.</p>
+          <p><strong>Momentum</strong> is judged by RSI. If the average RSI over the judging
+          cycle (short-term = today, mid-term = last calendar week, long-term = last calendar
+          month's actual trading days) is at or below the oversold threshold, it's a buy signal;
+          at or above the overbought threshold, it's a sell signal.</p>
+          <p><strong>Volume</strong> shows "spiking" as a reference indicator (it has no buy/sell
+          direction) when the average volume over the judging cycle exceeds
+          {PERIOD_PRESETS[mode]['volume_multiplier']}x the baseline.</p>
+        </details>
+
+        <details>
+          <summary>⚙️ Settings by time horizon (current: {_PERIOD_PRESET_LABELS_EN[mode]['label']})</summary>
+          {table_en}
+          <p class="muted">Short-term reacts faster but has more false signals; long-term fires
+          less often. Going a while without a signal is normal in long-term mode.</p>
+        </details>
+
+        <p><a href="?token={t}">Back</a></p>
+        """
 
     rows = []
     for key, p in PERIOD_PRESETS.items():
@@ -795,7 +965,7 @@ def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
 
     existing = _find_token_by_email(email)
     if existing and existing.get("status") == TOKEN_STATUS_APPROVED:
-        _send_confirmation_email_reminder(email, existing["token"])
+        _send_confirmation_email_reminder(email, existing["token"], _get_user_lang(existing))
         msg = ("This email is already registered. We've resent your access link." if lang == LANG_EN
                else "このメールアドレスは既に登録済みです。アクセス用リンクを再送しました。")
         return _page(f"<p>{msg}</p>", lang=lang)
@@ -807,14 +977,29 @@ def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
         "requested_at": datetime.now(timezone.utc).isoformat(),
         "lang": lang,
     })
-    _send_confirmation_email(email, token)
+    _send_confirmation_email(email, token, lang)
     msg = ("We've sent a confirmation email. Click the link inside to complete your registration."
            if lang == LANG_EN else "確認メールを送信しました。メール内のリンクをクリックして登録を完了してください。")
     return _page(f"<p>{msg}</p>", lang=lang)
 
 
-def _send_confirmation_email_reminder(email: str, token: str):
+def _send_confirmation_email_reminder(email: str, token: str, lang: str = LANG_JA):
     link = f"{REGISTER_FUNCTION_URL}?token={token}"
+    if lang == LANG_EN:
+        subject = "Your access link"
+        body = f"""
+        <p>This email address is already registered. Bookmark the link below to use the service.</p>
+        <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+        """
+        ses.send_email(
+            Source=SES_SENDER,
+            Destination={"ToAddresses": [email]},
+            Message={
+                "Subject": {"Data": subject, "Charset": "UTF-8"},
+                "Body": {"Html": {"Data": body, "Charset": "UTF-8"}},
+            },
+        )
+        return
     body = f"""
     <p>このメールアドレスは既に登録済みです。以下のリンクをブックマークしてご利用ください。</p>
     <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
@@ -829,32 +1014,37 @@ def _send_confirmation_email_reminder(email: str, token: str):
     )
 
 
-def _handle_contact(params: dict) -> dict:
+def _handle_contact(params: dict, lang: str = LANG_JA) -> dict:
     email = (params.get("contact_email") or "").strip()
     message = (params.get("contact_message") or "").strip()
 
     if not EMAIL_RE.match(email):
+        msg = ("The reply email address isn't valid." if lang == LANG_EN
+               else "返信用メールアドレスの形式が正しくありません。")
         return _page(
-            f'<p class="notice">返信用メールアドレスの形式が正しくありません。</p>{_render_contact_form()}',
-            status=400,
+            f'<p class="notice">{msg}</p>{_render_contact_form(lang)}',
+            status=400, lang=lang,
         )
     if not message:
+        msg = "Please enter your message." if lang == LANG_EN else "お問い合わせ内容を入力してください。"
         return _page(
-            f'<p class="notice">お問い合わせ内容を入力してください。</p>{_render_contact_form()}',
-            status=400,
+            f'<p class="notice">{msg}</p>{_render_contact_form(lang)}',
+            status=400, lang=lang,
         )
     try:
         n1, n2 = int(params.get("captcha_n1", "")), int(params.get("captcha_n2", ""))
         answer = int(params.get("captcha_answer", ""))
     except (TypeError, ValueError):
+        msg = "That answer wasn't correct, please try again." if lang == LANG_EN else "確認の回答が正しくありません。"
         return _page(
-            f'<p class="notice">確認の回答が正しくありません。</p>{_render_contact_form()}',
-            status=400,
+            f'<p class="notice">{msg}</p>{_render_contact_form(lang)}',
+            status=400, lang=lang,
         )
     if answer != n1 + n2:
+        msg = "That answer wasn't correct, please try again." if lang == LANG_EN else "確認の回答が正しくありません。"
         return _page(
-            f'<p class="notice">確認の回答が正しくありません。</p>{_render_contact_form()}',
-            status=400,
+            f'<p class="notice">{msg}</p>{_render_contact_form(lang)}',
+            status=400, lang=lang,
         )
 
     if SES_RECIPIENT:
@@ -866,9 +1056,16 @@ def _handle_contact(params: dict) -> dict:
                 "Subject": {"Data": "【PegSignal】お問い合わせ", "Charset": "UTF-8"},
                 "Body": {"Html": {"Data": (
                     f"<p>差出人(返信用): {html.escape(email)}</p>"
+                    f"<p>言語設定: {lang}</p>"
                     f"<p>{html.escape(message)}</p>"
                 ), "Charset": "UTF-8"}},
             },
+        )
+    if lang == LANG_EN:
+        return _page(
+            '<p class="notice">We\'ve received your message and will get back to you.</p>'
+            '<p><a href="?">Back to top</a></p>',
+            lang=lang,
         )
     return _page(
         '<p class="notice">お問い合わせを受け付けました。折り返しご連絡します。</p>'
@@ -961,24 +1158,24 @@ def handler(event, context):
         return _handle_manifest()
 
     if params.get("privacy"):
-        return _page(_render_privacy())
+        return _page(_render_privacy(lang), lang=lang)
 
     if params.get("terms"):
-        return _page(_render_terms())
+        return _page(_render_terms(lang), lang=lang)
 
     if params.get("about"):
-        return _page(_render_about())
+        return _page(_render_about(lang), lang=lang)
 
     if params.get("contact_submit"):
-        return _handle_contact(params)
+        return _handle_contact(params, lang)
 
     if params.get("contact"):
-        return _page(_render_contact_form())
+        return _page(_render_contact_form(lang), lang=lang)
 
     if params.get("info"):
         # トークン未所持でも仕組みの説明は読めるようにする(SEO・信頼性向上のため公開)。
         # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
-        return _page(_render_info(token))
+        return _page(_render_info(token, lang), lang=lang)
 
     if not _is_valid_token(token):
         return _page(_render_signup_form(lang), status=403 if token else 200, lang=lang)
