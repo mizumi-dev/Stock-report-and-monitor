@@ -536,3 +536,53 @@ class TestAccessLogging:
         rh.handler(_event(token=VALID_TOKEN), None)
         out = capsys.readouterr().out
         assert "[ACCESS] route=main_form has_token=True" in out
+
+
+class TestSignupsPaused:
+    """SES本番アクセス待ち等で新規登録だけを一時停止する機能(SIGNUPS_ENABLED)。
+    既存トークンでのアクセスには一切影響しないことを重点的に確認する。"""
+
+    def test_new_visitor_sees_paused_page_when_signups_disabled(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(), None)
+        assert r["statusCode"] == 503
+        assert "一時停止" in r["body"]
+        assert "申し込む" not in r["body"]  # 実際の送信ボタンは出ない
+
+    def test_invalid_token_sees_paused_page_when_signups_disabled(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(token="no-such-token"), None)
+        assert r["statusCode"] == 403
+        assert "一時停止" in r["body"]
+
+    def test_direct_signup_submission_rejected_when_signups_disabled(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(signup_email="new@example.com", captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        assert r["statusCode"] == 503
+        assert "一時停止" in r["body"]
+        assert not rh.ses.send_email.called
+        for v in rh.dynamodb.Table("approved_tokens")._items.values():
+            assert v.get("email") != "new@example.com"
+
+    def test_existing_approved_user_unaffected_when_signups_disabled(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(token=VALID_TOKEN), None)
+        assert r["statusCode"] == 200
+        assert "監視リスト" in r["body"]
+
+    def test_existing_user_can_still_delete_account_when_signups_disabled(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(token=VALID_TOKEN, delete_account="1"), None)
+        assert r["statusCode"] == 200
+        assert "退会" in r["body"]
+
+    def test_paused_page_is_english_when_lang_is_en(self, rh):
+        rh.SIGNUPS_ENABLED = False
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        assert "temporarily paused" in r["body"]
+
+    def test_signup_form_shown_normally_when_signups_enabled(self, rh):
+        assert rh.SIGNUPS_ENABLED is True
+        r = rh.handler(_event(), None)
+        assert r["statusCode"] == 200
+        assert "お申込み" in r["body"]
