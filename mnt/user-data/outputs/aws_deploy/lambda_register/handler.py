@@ -43,6 +43,9 @@ DAILY_BATCH_FUNCTION = os.environ.get("DAILY_BATCH_FUNCTION", "daily-batch")
 SES_SENDER = os.environ.get("SES_SENDER", "")
 SES_RECIPIENT = os.environ.get("SES_RECIPIENT", "")
 REGISTER_FUNCTION_URL = os.environ.get("REGISTER_FUNCTION_URL", "")
+# SESが本番アクセス許可待ち(サンドボックス)の間など、新規登録だけを一時停止したい時に
+# "false"にする。既存トークンでのアクセス(レポート受信・銘柄変更・退会等)には影響しない
+SIGNUPS_ENABLED = os.environ.get("SIGNUPS_ENABLED", "true").lower() != "false"
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
@@ -926,7 +929,33 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     """
 
 
+def _render_signups_paused(lang: str = LANG_JA) -> str:
+    """新規登録を一時停止している間に表示する案内。既存トークンでのアクセスは
+    このページを経由しない(handler()側でSIGNUPS_ENABLEDを見るのはトークン無し/
+    無効トークンの場合のみ)。"""
+    if lang == LANG_EN:
+        return """
+        <p class="eyebrow">PegSignal (free, indie-built)</p>
+        <h1>New sign-ups are temporarily paused</h1>
+        <p>We're doing some behind-the-scenes setup right now, so we can't accept new
+        sign-ups at this moment. Please check back again soon.</p>
+        <p class="muted">If you already have an access link, it still works as
+        usual — please use that link directly.</p>
+        """
+    return """
+    <p class="eyebrow">PegSignal（無料・個人開発）</p>
+    <h1>現在、新規登録の受付を一時停止しています</h1>
+    <p>裏側の準備作業を行っているため、只今は新規のお申込みを受け付けておりません。
+    しばらく経ってから改めてお試しください。</p>
+    <p class="muted">既にアクセス用リンクをお持ちの方は、通常通りご利用いただけます。
+    そのままリンクからお進みください。</p>
+    """
+
+
 def _handle_signup(params: dict, lang: str = LANG_JA) -> dict:
+    if not SIGNUPS_ENABLED:
+        return _page(_render_signups_paused(lang), status=503, lang=lang)
+
     email = (params.get("signup_email") or "").strip().lower()
     if not EMAIL_RE.match(email):
         msg = "Please enter a valid email address." if lang == LANG_EN else "メールアドレスの形式が正しくありません。"
@@ -1117,9 +1146,60 @@ def _handle_confirm(token: str, token_item: dict | None = None) -> dict:
     return _page(_render_form(token, lang, notice=notice), lang=lang)
 
 
+def _classify_route(params: dict) -> str:
+    """CloudWatch Logsでアクセス傾向を把握するための分類のみ。プライバシーポリシー
+    (IPアドレス・行動トラッキングを行わない旨)に反しないよう、メールアドレスや
+    トークン本体は一切ログに含めない(handler()側ではhas_tokenという真偽値のみ渡す)。"""
+    if params.get("confirm"):
+        return "confirm"
+    if params.get("signup_email"):
+        return "signup"
+    if params.get("manifest"):
+        return "manifest"
+    if params.get("privacy"):
+        return "privacy"
+    if params.get("terms"):
+        return "terms"
+    if params.get("about"):
+        return "about"
+    if params.get("contact_submit"):
+        return "contact_submit"
+    if params.get("contact"):
+        return "contact"
+    if params.get("info"):
+        return "info"
+    if params.get("lang") in SUPPORTED_LANGS:
+        return "lang_switch"
+    if params.get("delete_account_confirm"):
+        return "delete_account_confirm"
+    if params.get("delete_account"):
+        return "delete_account"
+    if params.get("mode"):
+        return "mode_change"
+    if params.get("report") in ("selection", "monitoring"):
+        return f"report_{params['report']}"
+    if params.get("ticker"):
+        return "ticker_action"
+    return "main_form"
+
+
+def _access_log_fields(event: dict) -> tuple[str, str]:
+    """ボットと人間を見分けるための最小限の付加情報。IPアドレスは含めない
+    (プライバシーポリシーに明記の通り)。パスは、クエリ文字列だけを見る
+    _classify_route()では判別できない「そもそも存在しないパスを叩いている
+    (典型的なボットの脆弱性スキャン挙動)」ケースを見分けるために必要。
+    User-Agentはブラウザ種別を示す一般的なサーバーログ項目で、個人特定情報ではない。"""
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
+    headers = event.get("headers") or {}
+    user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
+    return path, user_agent
+
+
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
+    path, user_agent = _access_log_fields(event)
+    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)} path={path!r} ua={user_agent!r}")
 
     # 英語版(en.pegsignal.com)対応。トークンが登録済みならその利用者が保存した言語を
     # 優先し(どちらのドメインから来ても本人の設定が優先される)、未登録の新規訪問者は
@@ -1157,6 +1237,8 @@ def handler(event, context):
         return _page(_render_info(token, lang), lang=lang)
 
     if not (token_item and token_item.get("status") == TOKEN_STATUS_APPROVED):
+        if not SIGNUPS_ENABLED:
+            return _page(_render_signups_paused(lang), status=403 if token else 503, lang=lang)
         return _page(_render_signup_form(lang), status=403 if token else 200, lang=lang)
 
     # 言語の手動切替(期間モードと同じ仕組み)。メイン画面のリンクから、
