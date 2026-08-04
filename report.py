@@ -65,6 +65,16 @@ def t(key: str, lang: str) -> str:
     return T[key][lang]
 
 
+def _as_of_note(as_of: str | None, lang: str) -> str:
+    """レポート即時発行ボタンは保存済みスナップショットをそのまま送るため、
+    「これはいつ時点のデータか」を明記する(定時実行のバッチ結果とボタン押下の
+    タイミングがずれても、利用者が古いデータと気づけるようにするため)。"""
+    if not as_of:
+        return ""
+    text = f"Data as of {as_of}" if lang == LANG_EN else f"{as_of}時点のデータです"
+    return f'<p style="color:#888;font-size:12px;">{text}</p>'
+
+
 def _mode_label(mode: str, lang: str) -> str:
     if not mode:
         return ""
@@ -173,8 +183,10 @@ def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = L
 
 
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
-                           register_token: str, mode: str = "", lang: str = LANG_JA) -> str:
-    """選定（買い時）レポート・週次"""
+                           register_token: str, mode: str = "", lang: str = LANG_JA,
+                           as_of: str | None = None) -> str:
+    """選定（買い時）レポート・週次。as_ofを渡すと「◯月◯日時点のデータです」の
+    注記を末尾に付ける(レポート即時発行ボタンが保存済みスナップショットを送る際に使う)。"""
     register_form_url = f"{register_base_url}?token={register_token}"
 
     if not ranked:
@@ -225,6 +237,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
       {body_rows}
       <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
       <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
+      {_as_of_note(as_of, lang)}
       {_unsubscribe_link(register_base_url, register_token, lang)}
     </body></html>
     """
@@ -234,10 +247,13 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
                             skipped: list[str] | None = None,
                             register_base_url: str | None = None,
                             register_token: str | None = None,
-                            lang: str = LANG_JA) -> str:
+                            lang: str = LANG_JA,
+                            as_of: str | None = None) -> str:
     """監視（売買判断）レポート・日次。各要素は {ticker, price, prev_close, signals, prev_signals}。
     register_base_url/register_tokenを渡すと、登録ページへのリンクを末尾に付ける
-    (銘柄追加・削除は登録ページ側で行うため、ここから迷わず辿れるようにする)"""
+    (銘柄追加・削除は登録ページ側で行うため、ここから迷わず辿れるようにする)。
+    as_ofを渡すと「◯月◯日時点のデータです」の注記を末尾に付ける(レポート即時発行
+    ボタンが保存済みスナップショットを送る際に使う)。"""
     increased = []
     warnings = []
     for r in watchlist_results:
@@ -328,6 +344,7 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
       {skipped_note}
       {register_link}
       <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
+      {_as_of_note(as_of, lang)}
       {unsubscribe_link}
     </body></html>
     """

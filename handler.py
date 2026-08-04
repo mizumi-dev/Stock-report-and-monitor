@@ -26,6 +26,7 @@ from config import (
     TOKEN_STATUS_APPROVED,
     get_preset,
     normalize_mode,
+    selection_snapshot_key,
     signal_history_date_key,
     user_period_mode_key,
 )
@@ -112,12 +113,25 @@ def get_user_watchlist(owner_token: str) -> list[str]:
     return [item["ticker"] for item in resp.get("Items", [])]
 
 
-def get_prev_signals(ticker: str, mode: str) -> dict | None:
-    """モードが同じ利用者同士で共有するキャッシュ(利用者ごとではない)。
-    RSI/トレンドはモードで値が変わるため、モードもキーに含める。"""
+def _get_signal_snapshot(ticker: str, mode: str, date_str: str) -> dict | None:
+    """指定日付分の監視データ(シグナル・価格・前日比較用データ)を1銘柄分読む。
+    モードが同じ利用者同士で共有するキャッシュ(利用者ごとではない)。"""
     table = dynamodb.Table(SIGNAL_HISTORY_TABLE)
-    resp = table.get_item(Key={"ticker": ticker, "date": signal_history_date_key(_yesterday_str(), mode)})
-    return resp.get("Item", {}).get("signals")
+    resp = table.get_item(Key={"ticker": ticker, "date": signal_history_date_key(date_str, mode)})
+    return resp.get("Item")
+
+
+def get_prev_signals(ticker: str, mode: str) -> dict | None:
+    """前日分のシグナル(「買いシグナル増加」判定の比較対象)。"""
+    snapshot = _get_signal_snapshot(ticker, mode, _yesterday_str())
+    return (snapshot or {}).get("signals")
+
+
+def get_latest_signal_snapshot(ticker: str, mode: str) -> dict | None:
+    """レポート即時発行ボタン用。当日分があればそれを、無ければ前日分を返す
+    (バッチ未実行の時間帯に押された場合の保険)。どちらも無ければNone
+    (登録直後でまだ誰の分も計算されていない銘柄)。"""
+    return _get_signal_snapshot(ticker, mode, _today_str()) or _get_signal_snapshot(ticker, mode, _yesterday_str())
 
 
 def _to_dynamodb_safe(value):
@@ -131,12 +145,17 @@ def _to_dynamodb_safe(value):
     return value
 
 
-def save_signals(ticker: str, mode: str, signals: dict):
+def save_signal_snapshot(ticker: str, mode: str, entry: dict):
+    """本日分の監視データ(シグナル・価格・前日比較用データ)をまとめて保存する。
+    レポート即時発行ボタンはこのスナップショットを読むだけで、新規のyfinance取得は
+    行わない(定時実行結果と常に一致させ、ボタン連打によるコスト増・利用者間で共有する
+    シグナル履歴の汚染を防ぐため)。"""
     table = dynamodb.Table(SIGNAL_HISTORY_TABLE)
     table.put_item(Item={
         "ticker": ticker,
         "date": signal_history_date_key(_today_str(), mode),
-        "signals": _to_dynamodb_safe(signals),
+        "as_of_date": _today_str(),
+        **_to_dynamodb_safe(entry),
     })
 
 
@@ -151,9 +170,51 @@ def send_email(subject: str, html_body: str, to_address: str):
     )
 
 
+# report.py が実際に使うフィールドのみ(ranked各要素にはdata_sources.get_stock_data由来の
+# "history"(pandas DataFrame、DynamoDBに保存できない)や current_price/prev_close/error等、
+# レポート表示に不要なフィールドも混ざっているため、保存前に削ぎ落とす)
+_SELECTION_CACHE_FIELDS = ("ticker", "company_name", "peg", "earnings_growth", "market_cap")
+
+
+def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict):
+    """選定レポートのランキング+シグナルをモードごとに保存する。レポート即時発行
+    ボタンはこれを読むだけで新規スキャンを行わない(定時実行結果と常に一致させ、
+    ボタン連打によるコスト増を防ぐため)。signals_mapはランキングに載る銘柄分だけに
+    刈り込んでから保存する(全銘柄分は不要で、無駄にDynamoDBの項目サイズを使うため)。"""
+    cacheable_ranked = [{k: s.get(k) for k in _SELECTION_CACHE_FIELDS} for s in ranked]
+    tickers = [s["ticker"] for s in ranked]
+    trimmed_signals = {t: signals_map[t] for t in tickers if t in signals_map}
+    table = dynamodb.Table(SETTINGS_TABLE)
+    table.put_item(Item={
+        "key": selection_snapshot_key(mode),
+        "ranked": _to_dynamodb_safe(cacheable_ranked),
+        "signals_map": _to_dynamodb_safe(trimmed_signals),
+        "as_of_date": _today_str(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+def get_selection_snapshot(mode: str) -> dict | None:
+    """レポート即時発行ボタン用。保存済みスナップショットが無ければNone
+    (サービス開始直後など、そのモードでまだ一度もバッチが走っていない場合)。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": selection_snapshot_key(mode)})
+        item = resp.get("Item")
+        if not item or "ranked" not in item:
+            return None
+        return {"ranked": list(item["ranked"]), "signals_map": dict(item["signals_map"]),
+                "as_of_date": item.get("as_of_date")}
+    except Exception as e:
+        print(f"[WARN] 選定スナップショットの取得に失敗: {e}")
+        return None
+
+
 def _scan_universe(mode: str) -> tuple[list, dict]:
     """NASDAQ100全銘柄をスキャンし、ランキングと全銘柄分のシグナルを返す。
-    利用者ごとではなく、同じモードを使う利用者全員で使い回す(スキャンが重いため)。"""
+    利用者ごとではなく、同じモードを使う利用者全員で使い回す(スキャンが重いため)。
+    結果はそのままそのモードの「本日のスナップショット」として保存する
+    (定時実行・即時発行ボタンのフォールバック、いずれから呼ばれても同じ扱いにする)。"""
     preset = get_preset(mode)
 
     cached = get_cached_tickers()
@@ -184,11 +245,13 @@ def _scan_universe(mode: str) -> tuple[list, dict]:
         )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
+    save_selection_snapshot(mode, ranked, signals_map)
     return ranked, signals_map
 
 
 def run_selection_reports(users: list[dict]):
-    """usersに含まれる利用者全員へ選定レポートを送る。モードごとに1回だけスキャンする。"""
+    """usersに含まれる利用者全員へ選定レポートを送る(定時実行用)。モードごとに
+    1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。"""
     by_mode: dict[str, list[dict]] = {}
     for u in users:
         mode = get_user_period_mode(u["token"])
@@ -198,45 +261,135 @@ def run_selection_reports(users: list[dict]):
         ranked, signals_map = _scan_universe(mode)
         for u in group:
             lang = u.get("lang") or "ja"
-            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode, lang=lang)
+            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode,
+                                          lang=lang, as_of=_today_str())
             subject = "📈 This week's buy-time picks" if lang == "en" else "📈 今週の買い時レポート"
             send_email(subject, body, u["email"])
 
 
-def run_monitoring_reports(users: list[dict]):
-    """usersに含まれる利用者全員へ、それぞれの監視リストに基づくレポートを送る。
-    watchlistが空の利用者はスキップする。"""
-    for u in users:
-        watchlist = get_user_watchlist(u["token"])
-        if not watchlist:
-            continue
+def send_selection_report_now(user: dict):
+    """レポート即時発行ボタン用。保存済みスナップショットを読んで送るだけで、
+    新規スキャンは行わない(そのモードで一度もバッチが走っていない場合のみ、
+    その場で1回スキャンする)。"""
+    mode = get_user_period_mode(user["token"])
+    snapshot = get_selection_snapshot(mode)
+    if snapshot is None:
+        ranked, signals_map = _scan_universe(mode)  # 内部でスナップショットも保存される
+        as_of = _today_str()
+    else:
+        ranked, signals_map = snapshot["ranked"], snapshot["signals_map"]
+        as_of = snapshot["as_of_date"]
 
-        mode = get_user_period_mode(u["token"])
+    lang = user.get("lang") or "ja"
+    body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang, as_of=as_of)
+    subject = "📈 This week's buy-time picks" if lang == "en" else "📈 今週の買い時レポート"
+    send_email(subject, body, user["email"])
+
+
+def run_monitoring_reports(users: list[dict]):
+    """usersに含まれる利用者全員へ、それぞれの監視リストに基づくレポートを送る
+    (定時実行用)。watchlistが空の利用者はスキップする。利用者ごとの監視銘柄を
+    モードごとに集約し、複数人が同じ銘柄を登録していても取得・計算は1回だけにする。"""
+    watchlists = {u["token"]: get_user_watchlist(u["token"]) for u in users}
+    modes = {u["token"]: get_user_period_mode(u["token"]) for u in users if watchlists[u["token"]]}
+
+    tickers_by_mode: dict[str, set[str]] = {}
+    for token, mode in modes.items():
+        tickers_by_mode.setdefault(mode, set()).update(watchlists[token])
+
+    # (mode, ticker) -> スナップショット、または取得失敗を表すNone
+    snapshots: dict[tuple[str, str], dict | None] = {}
+    for mode, tickers in tickers_by_mode.items():
         preset = get_preset(mode)
-        results, skipped = [], []
-        for t in watchlist:
+        for t in tickers:
             d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
             if d.get("history") is None:
+                snapshots[(mode, t)] = None
+                continue
+            sig = calc_all_signals(d["history"], mode)
+            entry = {
+                "signals": sig,
+                "price": d["current_price"],
+                "prev_close": d["prev_close"],
+                "peg": d.get("peg"),
+                "prev_signals": get_prev_signals(t, mode),
+            }
+            save_signal_snapshot(t, mode, entry)
+            snapshots[(mode, t)] = entry
+
+    for u in users:
+        watchlist = watchlists[u["token"]]
+        if not watchlist:
+            continue
+        mode = modes[u["token"]]
+        results, skipped = [], []
+        for t in watchlist:
+            entry = snapshots.get((mode, t))
+            if entry is None:
                 # 上場間もない等でデータが足りない銘柄。黙って消すと利用者が混乱するため
                 # レポートに理由付きで載せる
                 skipped.append(t)
                 continue
-            sig = calc_all_signals(d["history"], mode)
-            prev_sig = get_prev_signals(t, mode)
             results.append({
                 "ticker": t,
-                "price": d["current_price"],
-                "prev_close": d["prev_close"],
-                "signals": sig,
-                "prev_signals": prev_sig,
-                "peg": d.get("peg"),
+                "price": entry["price"],
+                "prev_close": entry["prev_close"],
+                "signals": entry["signals"],
+                "prev_signals": entry.get("prev_signals"),
+                "peg": entry.get("peg"),
             })
-            save_signals(t, mode, sig)
 
         lang = u.get("lang") or "ja"
-        body = build_monitoring_report(results, mode, skipped, REGISTER_URL, u["token"], lang=lang)
+        body = build_monitoring_report(results, mode, skipped, REGISTER_URL, u["token"],
+                                       lang=lang, as_of=_today_str())
         subject = "📊 Today's monitoring report" if lang == "en" else "📊 本日の監視レポート"
         send_email(subject, body, u["email"])
+
+
+def send_monitoring_report_now(user: dict):
+    """レポート即時発行ボタン用。保存済みスナップショット(当日分、無ければ前日分)を
+    読んで送るだけで、新規のyfinance取得は行わない(登録直後でまだ誰の分も計算されて
+    いない銘柄のみ、その場で1回取得する)。"""
+    watchlist = get_user_watchlist(user["token"])
+    if not watchlist:
+        return
+
+    mode = get_user_period_mode(user["token"])
+    preset = get_preset(mode)
+    results, skipped, as_of_dates = [], [], []
+    for t in watchlist:
+        snapshot = get_latest_signal_snapshot(t, mode)
+        if snapshot is None:
+            d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
+            if d.get("history") is None:
+                skipped.append(t)
+                continue
+            sig = calc_all_signals(d["history"], mode)
+            snapshot = {
+                "signals": sig,
+                "price": d["current_price"],
+                "prev_close": d["prev_close"],
+                "peg": d.get("peg"),
+                "prev_signals": get_prev_signals(t, mode),
+                "as_of_date": _today_str(),
+            }
+            save_signal_snapshot(t, mode, snapshot)
+
+        results.append({
+            "ticker": t,
+            "price": snapshot["price"],
+            "prev_close": snapshot["prev_close"],
+            "signals": snapshot["signals"],
+            "prev_signals": snapshot.get("prev_signals"),
+            "peg": snapshot.get("peg"),
+        })
+        as_of_dates.append(snapshot.get("as_of_date", _today_str()))
+
+    lang = user.get("lang") or "ja"
+    as_of = min(as_of_dates) if as_of_dates else _today_str()
+    body = build_monitoring_report(results, mode, skipped, REGISTER_URL, user["token"], lang=lang, as_of=as_of)
+    subject = "📊 Today's monitoring report" if lang == "en" else "📊 本日の監視レポート"
+    send_email(subject, body, user["email"])
 
 
 def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_report_day: str) -> bool:
@@ -259,16 +412,27 @@ def _dispatch(event: dict) -> dict:
 
     owner_token = event.get("owner_token")
 
-    # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ送る
+    # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ、保存済み
+    # スナップショットから即座に組み立てて送る(新規のyfinance取得は行わない)。
+    # owner_token無しでの呼び出しはテスト・運用目的の一斉送信用(定時実行と同じ経路)
     if event.get("monitoring_only"):
-        users = [u for u in get_approved_users() if u["token"] == owner_token] if owner_token else get_approved_users()
-        run_monitoring_reports(users)
+        if owner_token:
+            target = next((u for u in get_approved_users() if u["token"] == owner_token), None)
+            if target:
+                send_monitoring_report_now(target)
+        else:
+            run_monitoring_reports(get_approved_users())
         return {"statusCode": 200, "body": "OK"}
 
-    # 画面の「選定レポートを送る」ボタン、またはテスト用に選定のみ実行する
+    # 画面の「選定レポートを送る」ボタンから来た場合も同様、保存済みスナップショットを
+    # 読むだけで送る(そのモードで一度もバッチが走っていない場合のみその場でスキャンする)
     if event.get("force_weekly"):
-        users = [u for u in get_approved_users() if u["token"] == owner_token] if owner_token else get_approved_users()
-        run_selection_reports(users)
+        if owner_token:
+            target = next((u for u in get_approved_users() if u["token"] == owner_token), None)
+            if target:
+                send_selection_report_now(target)
+        else:
+            run_selection_reports(get_approved_users())
         return {"statusCode": 200, "body": "OK"}
 
     # EventBridge Schedulerからの定期実行。TODO#7a: simulate_dateがあればそれを使い、
