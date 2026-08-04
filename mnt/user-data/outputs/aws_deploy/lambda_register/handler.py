@@ -1183,10 +1183,23 @@ def _classify_route(params: dict) -> str:
     return "main_form"
 
 
+def _access_log_fields(event: dict) -> tuple[str, str]:
+    """ボットと人間を見分けるための最小限の付加情報。IPアドレスは含めない
+    (プライバシーポリシーに明記の通り)。パスは、クエリ文字列だけを見る
+    _classify_route()では判別できない「そもそも存在しないパスを叩いている
+    (典型的なボットの脆弱性スキャン挙動)」ケースを見分けるために必要。
+    User-Agentはブラウザ種別を示す一般的なサーバーログ項目で、個人特定情報ではない。"""
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
+    headers = event.get("headers") or {}
+    user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
+    return path, user_agent
+
+
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
-    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)}")
+    path, user_agent = _access_log_fields(event)
+    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)} path={path!r} ua={user_agent!r}")
 
     # 英語版(en.pegsignal.com)対応。トークンが登録済みならその利用者が保存した言語を
     # 優先し(どちらのドメインから来ても本人の設定が優先される)、未登録の新規訪問者は

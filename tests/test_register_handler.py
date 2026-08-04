@@ -537,6 +537,37 @@ class TestAccessLogging:
         out = capsys.readouterr().out
         assert "[ACCESS] route=main_form has_token=True" in out
 
+    def test_logs_path_and_user_agent(self, rh, capsys):
+        event = {
+            "queryStringParameters": {},
+            "rawPath": "/",
+            "headers": {"user-agent": "Mozilla/5.0 (Macintosh)"},
+        }
+        rh.handler(event, None)
+        out = capsys.readouterr().out
+        assert "path='/'" in out
+        assert "ua='Mozilla/5.0 (Macintosh)'" in out
+
+    def test_logs_reveal_bot_hitting_nonexistent_path(self, rh, capsys):
+        """クエリ文字列だけを見るroute分類では、正規のトップページとボットが
+        叩く存在しないパスを区別できない。pathを見て初めて判別できることを確認する。"""
+        event = {
+            "queryStringParameters": {},
+            "rawPath": "/wp-login.php",
+            "headers": {"user-agent": "python-requests/2.31"},
+        }
+        rh.handler(event, None)
+        out = capsys.readouterr().out
+        assert "route=main_form" in out  # クエリだけでは正規訪問と同じ分類になる
+        assert "path='/wp-login.php'" in out  # pathを見ればボットだとわかる
+        assert "ua='python-requests/2.31'" in out
+
+    def test_logs_default_path_when_missing_from_event(self, rh, capsys):
+        rh.handler(_event(token=VALID_TOKEN), None)
+        out = capsys.readouterr().out
+        assert "path='/'" in out
+        assert "ua=''" in out
+
 
 class TestSignupsPaused:
     """SES本番アクセス待ち等で新規登録だけを一時停止する機能(SIGNUPS_ENABLED)。
