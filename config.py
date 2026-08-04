@@ -123,3 +123,11 @@ def signal_history_date_key(date_str: str, mode: str) -> str:
     RSI/トレンドはモードで値が変わるため、モードごとに別キャッシュにする必要がある
     (ただし利用者ごとではなく、モードが同じ利用者同士で共有できる)。"""
     return f"{date_str}#{normalize_mode(mode)}"
+
+
+def selection_snapshot_key(mode: str) -> str:
+    """app_settingsに選定レポートのスナップショット(ランキング+シグナル)を
+    モードごとに保存する際のキー。レポート即時発行ボタンはこのスナップショットを
+    読むだけで、新規スキャンは行わない(利用者間で共有する定時実行結果と常に一致させ、
+    ボタン連打によるコスト増・シグナル履歴汚染を防ぐため)。"""
+    return f"selection_snapshot#{normalize_mode(mode)}"
