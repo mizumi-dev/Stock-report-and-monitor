@@ -57,11 +57,12 @@ def _yesterday_str():
 
 
 def get_approved_users() -> list[dict]:
-    """status=approvedの利用者一覧({"token":..., "email":...})を返す"""
+    """status=approvedの利用者一覧({"token":..., "email":..., "lang":...})を返す。
+    langは申込み・言語切替時にregister-stock側が保存したもの(未設定時は"ja")。"""
     table = dynamodb.Table(APPROVED_TOKENS_TABLE)
     resp = table.scan()
     return [
-        {"token": item["token"], "email": item["email"]}
+        {"token": item["token"], "email": item["email"], "lang": item.get("lang") or "ja"}
         for item in resp.get("Items", [])
         if item.get("status") == TOKEN_STATUS_APPROVED
     ]
@@ -194,11 +195,12 @@ def run_selection_reports(users: list[dict]):
         by_mode.setdefault(mode, []).append(u)
 
     for mode, group in by_mode.items():
-        preset = get_preset(mode)
         ranked, signals_map = _scan_universe(mode)
         for u in group:
-            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], preset["label"])
-            send_email("📈 今週の買い時レポート", body, u["email"])
+            lang = u.get("lang") or "ja"
+            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode, lang=lang)
+            subject = "📈 This week's buy-time picks" if lang == "en" else "📈 今週の買い時レポート"
+            send_email(subject, body, u["email"])
 
 
 def run_monitoring_reports(users: list[dict]):
@@ -231,8 +233,10 @@ def run_monitoring_reports(users: list[dict]):
             })
             save_signals(t, mode, sig)
 
-        body = build_monitoring_report(results, preset["label"], skipped, REGISTER_URL, u["token"])
-        send_email("📊 本日の監視レポート", body, u["email"])
+        lang = u.get("lang") or "ja"
+        body = build_monitoring_report(results, mode, skipped, REGISTER_URL, u["token"], lang=lang)
+        subject = "📊 Today's monitoring report" if lang == "en" else "📊 本日の監視レポート"
+        send_email(subject, body, u["email"])
 
 
 def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_report_day: str) -> bool:
