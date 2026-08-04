@@ -38,7 +38,7 @@ def test_selection_report_links_use_each_users_own_token(monkeypatch):
     monkeypatch.setattr(handler, "_scan_universe", lambda mode: ([], {}))
 
     used_tokens = []
-    def fake_build(ranked, signals_map, url, token, label):
+    def fake_build(ranked, signals_map, url, token, mode, lang="ja"):
         used_tokens.append(token)
         return "body"
     monkeypatch.setattr(handler, "build_selection_report", fake_build)

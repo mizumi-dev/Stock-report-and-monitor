@@ -124,3 +124,59 @@ def test_monitoring_report_includes_unsubscribe_link_when_token_provided():
 def test_monitoring_report_omits_unsubscribe_link_when_not_provided():
     body = build_monitoring_report([])
     assert "delete_account=1" not in body
+
+
+def test_selection_report_defaults_to_japanese_when_lang_omitted():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "今週の買い時レポート" in body
+    assert 'href="https://www.moomoo.com/ja/stock/NVDA-US"' in body
+
+
+def test_selection_report_is_english_when_lang_is_en():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+
+    assert "This week's buy-time picks" in body
+    assert "今週の買い時レポート" not in body
+    # 米国口座数ランキング上位のうち、ログイン不要で個別銘柄ページへ直接リンクできる
+    # Fidelity・Robinhoodを採用(Schwab/Vanguardは非対応、TODO.md参照)
+    assert 'href="https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=NVDA"' in body
+    assert 'href="https://robinhood.com/stocks/NVDA"' in body
+    assert "moomoo" not in body
+    assert "楽天" not in body
+
+
+def test_selection_report_mode_label_is_english_when_lang_is_en():
+    body = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="SHORT", lang="en")
+    assert "Time horizon: Short-term" in body
+
+
+def test_selection_report_unsubscribe_link_is_english_when_lang_is_en():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+    assert "Unsubscribe / delete account" in body
+
+
+def test_monitoring_report_is_english_when_lang_is_en():
+    watchlist_results = [{
+        "ticker": "AAPL", "price": 210.5, "prev_close": 208.0,
+        "signals": {"buy_trend": True, "buy_momentum": False, "sell_trend": False,
+                    "sell_momentum": False, "volume_high": False, "volume_ratio": 1.1},
+        "prev_signals": {},
+    }]
+    body = build_monitoring_report(watchlist_results, mode="MID", register_base_url="https://pegsignal.com/",
+                                    register_token="tok123", lang="en")
+
+    assert "Today's monitoring report" in body
+    assert "本日の監視レポート" not in body
+    assert "Time horizon: Mid-term" in body
+    assert 'href="https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=AAPL"' in body
+    assert 'href="https://robinhood.com/stocks/AAPL"' in body
+    assert "Add or remove stocks" in body

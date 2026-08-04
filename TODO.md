@@ -2,6 +2,39 @@
 
 最終更新: 2026-08-03
 
+## 英語版: レポート本文の英訳・米国向け証券リンク（2026-08-04）
+
+英語版の残件のうち、daily-batchが生成するレポート本文(`report.py`)自体の英訳と、
+英語圏利用者向けの証券リンク出し分けに対応。
+
+- **証券リンクの選定**: Web検索で米国口座数ランキングを調査（Fidelity約5,200万
+  > Schwab約3,780万 ≈ Vanguard約5,000万(投信中心) > Robinhood約2,740万）。
+  ただしログイン不要で個別銘柄ページへ直接リンクできることを確認できたのは
+  **Fidelity**(`digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=`、
+  1位)と**Robinhood**(`robinhood.com/stocks/`、4位・SEO公開ページ)のみ。
+  Schwab(2位)は要ログインの可能性が高く、Vanguard(3位)は投信中心で個別株
+  ページの公開URLパターンが確認できなかったため見送った。ユーザーの了承の上、
+  3位・4位でリンク可能な方を採用する方針とした
+- **`report.py`の全面英語対応**: `build_selection_report`/`build_monitoring_report`に
+  `lang: str = "ja"`引数を追加（デフォルトは日本語のまま、既存呼び出しは無変更で動く）。
+  シグナル凡例・トレンド/モメンタム文言・サマリー文・見出し・免責事項・退会リンク・
+  登録リンクなど全テキストをlang分岐。`_broker_links(ticker, lang)`もja/enで
+  出し分け（ja→moomoo証券・楽天証券、en→Fidelity・Robinhood）
+- **期間モードラベル**: 引数名を`mode_label`(整形済み文字列)から`mode`(生のモード
+  キー、例:"SHORT")に変更し、`report.py`内でja/en両方のラベルを解決するように変更
+  （config.pyのPERIOD_PRESETSはja版の単一情報源として引き続き参照、en版のみ
+  ローカル対訳表`_MODE_LABEL_EN`を追加。register-stock側の`_PERIOD_PRESET_LABELS_EN`
+  と同じ発想で、共有のconfig.pyには手を入れない）
+- **daily-batch側の連携**: `get_approved_users()`が返す辞書に`"lang"`を追加
+  (`approved_tokens`に保存済みの値、未設定時は"ja")。`run_selection_reports`/
+  `run_monitoring_reports`で各利用者の`lang`を`build_*_report()`に渡し、
+  メール件名も出し分け
+- テスト6件追加(`test_report.py`)、`test_multi_tenant.py`の`fake_build`が新しい
+  `lang`引数を受け取れるよう修正（pandas依存のためこの開発環境では実行できないが、
+  シグネチャ変更に追従が必要だったため対応）
+- **残る英語版の作業**: `en.pegsignal.com`のインフラ実デプロイ(`deploy_domain_en.sh`・
+  `deploy_patch_ja_lang_header.sh`、新しいAWS権限が必要)
+
 ## 運用ダッシュボード
 
 進捗確認用に以下のダッシュボードを公開している(Claudeが会話内で随時更新):
