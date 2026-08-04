@@ -514,3 +514,25 @@ class TestInfoPagesLanguage:
                               contact_email="a@example.com", contact_message="hi",
                               captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
         assert "We've received your message" in r["body"]
+
+
+class TestAccessLogging:
+    """CloudWatch Logsでアクセス傾向を把握するためのログ出力。メールアドレスや
+    トークン本体がログに含まれないこと(プライバシーポリシーの遵守)を確認する。"""
+
+    def test_logs_route_classification_without_leaking_email_or_token(self, rh, capsys):
+        rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
+        out = capsys.readouterr().out
+        assert "[ACCESS] route=ticker_action has_token=True" in out
+        assert VALID_TOKEN not in out
+
+    def test_logs_signup_route_without_leaking_email(self, rh, capsys):
+        rh.handler(_event(signup_email="new@example.com", captcha_n1="2", captcha_n2="3", captcha_answer="5"), None)
+        out = capsys.readouterr().out
+        assert "[ACCESS] route=signup has_token=False" in out
+        assert "new@example.com" not in out
+
+    def test_logs_main_form_route_when_no_special_params(self, rh, capsys):
+        rh.handler(_event(token=VALID_TOKEN), None)
+        out = capsys.readouterr().out
+        assert "[ACCESS] route=main_form has_token=True" in out

@@ -1117,9 +1117,47 @@ def _handle_confirm(token: str, token_item: dict | None = None) -> dict:
     return _page(_render_form(token, lang, notice=notice), lang=lang)
 
 
+def _classify_route(params: dict) -> str:
+    """CloudWatch Logsでアクセス傾向を把握するための分類のみ。プライバシーポリシー
+    (IPアドレス・行動トラッキングを行わない旨)に反しないよう、メールアドレスや
+    トークン本体は一切ログに含めない(handler()側ではhas_tokenという真偽値のみ渡す)。"""
+    if params.get("confirm"):
+        return "confirm"
+    if params.get("signup_email"):
+        return "signup"
+    if params.get("manifest"):
+        return "manifest"
+    if params.get("privacy"):
+        return "privacy"
+    if params.get("terms"):
+        return "terms"
+    if params.get("about"):
+        return "about"
+    if params.get("contact_submit"):
+        return "contact_submit"
+    if params.get("contact"):
+        return "contact"
+    if params.get("info"):
+        return "info"
+    if params.get("lang") in SUPPORTED_LANGS:
+        return "lang_switch"
+    if params.get("delete_account_confirm"):
+        return "delete_account_confirm"
+    if params.get("delete_account"):
+        return "delete_account"
+    if params.get("mode"):
+        return "mode_change"
+    if params.get("report") in ("selection", "monitoring"):
+        return f"report_{params['report']}"
+    if params.get("ticker"):
+        return "ticker_action"
+    return "main_form"
+
+
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
+    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)}")
 
     # 英語版(en.pegsignal.com)対応。トークンが登録済みならその利用者が保存した言語を
     # 優先し(どちらのドメインから来ても本人の設定が優先される)、未登録の新規訪問者は

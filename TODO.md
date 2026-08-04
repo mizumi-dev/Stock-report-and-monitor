@@ -2,6 +2,25 @@
 
 最終更新: 2026-08-04
 
+## アクセス傾向を把握するための最小限のログ出力（2026-08-04）
+
+「誰も登録してくれない」という相談を受け、CloudWatchで実際のアクセス数を確認しようと
+したところ、デプロイ用IAMユーザーに閲覧権限が無く見えなかった。ユーザーがIAMコンソール
+から`cloudwatch:GetMetricData`・`logs:FilterLogEvents`等を追加(既存の不要な一時ポリシー
+`sns-cloudwatch-alarm-setup`を削除、`dynamodb-multi-tenant-migration`は全削除すると
+`dynamodb:Query`(watchlistテーブル、両Lambdaが日常的に使用)まで失われるため、
+Queryのみに絞った最小権限へ編集する形で対応)。
+
+Lambda呼び出し回数自体は見えるようになったが、リクエストの中身(申込みフォームまで
+来ているのか、単なるbot/自分のテストアクセスか)が判別できなかったため、
+`register-stock`の`handler()`に最小限のアクセスログを追加。
+
+- **対応済み**: `_classify_route(params)`でリクエストを`signup`/`confirm`/`main_form`/
+  `ticker_action`等に分類し、`[ACCESS] route=... has_token=...`の1行のみをログ出力。
+  プライバシーポリシー(IPアドレス・行動トラッキングを行わない旨)に反しないよう、
+  メールアドレス・トークン本体は一切ログに含めない
+- テスト3件追加、ログにメールアドレス・トークンが含まれないことも確認
+
 ## レポート即時発行ボタンの低コスト化（2026-08-04）
 
 登録者が増えると「レポートを今すぐ送る」ボタンの押下も増え、その都度yfinanceから
