@@ -35,7 +35,9 @@ MA_OR_MACD = "MA"
 PERIOD_PRESETS = {
     "SHORT": {
         "label": "短期",
+        "label_en": "Short-term",
         "description": "値動きの変化に早く反応する。シグナルは多いが騙しも多い。",
+        "description_en": "Reacts fast to price moves. More signals, but more false ones too.",
         "ma_short": 5,
         "ma_long": 20,
         "ma_filter": None,
@@ -51,7 +53,9 @@ PERIOD_PRESETS = {
     },
     "MID": {
         "label": "中期",
+        "label_en": "Mid-term",
         "description": "日足スイングの標準設定。200日線で相場の地合いを絞り込む。",
+        "description_en": "Standard daily-swing setup, filtered by the 200-day average.",
         "ma_short": 20,
         "ma_long": 50,
         "ma_filter": 200,
@@ -67,7 +71,9 @@ PERIOD_PRESETS = {
     },
     "LONG": {
         "label": "長期",
+        "label_en": "Long-term",
         "description": "50日線と200日線のクロスで相場全体の転換を捉える。点灯は年に数回程度。",
+        "description_en": "Tracks broad trend reversals via the 50/200-day cross. Fires a few times a year.",
         "ma_short": 50,
         "ma_long": 200,
         "ma_filter": None,

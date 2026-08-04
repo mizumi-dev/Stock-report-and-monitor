@@ -3,110 +3,130 @@
 
 lang="ja"(既定)なら従来通り日本語、lang="en"なら英語版を生成する。
 既存の呼び出し(lang省略)は今まで通り日本語のまま動く。
+
+単語の並び順が言語間で大きく異なる箇所(銘柄カード・監視ブロックの本文)は
+テンプレートを共有せず素直にja/enを別々に書いているが、単純な文言の
+出し分け(見出し・ラベル・凡例等)はすべて下のT辞書 + t()に集約している。
 """
 from config import PERIOD_PRESETS
 
 LANG_JA = "ja"
 LANG_EN = "en"
 
-DISCLAIMER_JA = "※本レポートは投資助言ではありません"
-DISCLAIMER_EN = "This report is not investment advice."
+# 単純な文言の出し分けはすべてここに集約する({キー: {ja:..., en:...}})。
+# カード本文のように語順自体が言語で変わる箇所は対象外(それぞれ個別にja/en分岐する)。
+T = {
+    "disclaimer": {LANG_JA: "※本レポートは投資助言ではありません",
+                   LANG_EN: "This report is not investment advice."},
+    "summary_label": {LANG_JA: "🔎 サマリー", LANG_EN: "🔎 Summary"},
+    "selection_heading": {LANG_JA: "📈 今週の買い時レポート", LANG_EN: "📈 This week's buy-time picks"},
+    "monitoring_heading": {LANG_JA: "📊 本日の監視レポート", LANG_EN: "📊 Today's monitoring report"},
+    "no_candidates": {LANG_JA: "本日、足切り条件を通過した銘柄はありませんでした。",
+                       LANG_EN: "No stocks passed the screening criteria today."},
+    "other_ticker_link": {LANG_JA: "検索ボックスから他の銘柄を登録する →",
+                          LANG_EN: "Add another ticker via search →"},
+    "add_to_watchlist": {LANG_JA: "この銘柄を監視リストに登録 →", LANG_EN: "Add to watchlist →"},
+    "unsubscribe": {LANG_JA: "配信停止・退会はこちら →", LANG_EN: "Unsubscribe / delete account →"},
+    "register_link": {LANG_JA: "銘柄を追加・削除する（登録ページを開く） →",
+                      LANG_EN: "Add or remove stocks (open the registration page) →"},
+    "col_trend": {LANG_JA: "トレンド", LANG_EN: "Trend"},
+    "col_momentum": {LANG_JA: "モメンタム", LANG_EN: "Momentum"},
+    "col_volume": {LANG_JA: "出来高", LANG_EN: "Volume"},
+    "row_buy": {LANG_JA: "🟢買い", LANG_EN: "🟢 Buy"},
+    "row_sell": {LANG_JA: "🔴売り", LANG_EN: "🔴 Sell"},
+    "volume_high": {LANG_JA: "急増", LANG_EN: "Spiking"},
+    "volume_normal": {LANG_JA: "平常", LANG_EN: "Normal"},
+    "no_warnings": {LANG_JA: "なし", LANG_EN: "None"},
+    "warn_dead_cross": {LANG_JA: "デッドクロス", LANG_EN: "Dead cross"},
+    "peg_reference": {LANG_JA: "PEG(参考)", LANG_EN: "PEG (reference)"},
+    "signal_legend": {
+        LANG_JA: (
+            "シグナルの見方: 「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
+            "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
+            "この選定は<strong>PEG(株価に対する利益成長率の割安度)を基準にランキング</strong>したもので、"
+            "シグナルは現在の値動きの状態を補足する参考情報です。"
+            "トレンドが既に下向き(デッドクロス)の銘柄は、割安に見えても値動きが弱い可能性があるため"
+            "注意してください。"
+        ),
+        LANG_EN: (
+            "How to read the signals: \"Trend\" is a golden/dead cross (moving average crossover), "
+            "\"Momentum\" is RSI (overbought/oversold), and \"Volume\" compares against the normal "
+            "baseline. This selection is <strong>ranked by PEG ratio</strong> "
+            "(how undervalued the price is relative to earnings growth) — the signals are just "
+            "supplementary information about current price action. "
+            "A stock with an already-declining trend (dead cross) may be weak even if it looks "
+            "cheap, so please keep that in mind."
+        ),
+    },
+}
 
-# config.PERIOD_PRESETS[key]["label"]は日本語("短期"等)のみのため、英語版はここで
-# ローカルに対訳を持つ(register-stock側の_PERIOD_PRESET_LABELS_ENと同じ発想。
-# config.pyはdaily-batch/register-stock双方が参照する共有データなので手を入れない)
-_MODE_LABEL_EN = {"SHORT": "Short-term", "MID": "Mid-term", "LONG": "Long-term"}
+
+def t(key: str, lang: str) -> str:
+    return T[key][lang]
 
 
 def _mode_label(mode: str, lang: str) -> str:
     if not mode:
         return ""
-    if lang == LANG_EN:
-        return _MODE_LABEL_EN.get(mode, mode)
-    return PERIOD_PRESETS.get(mode, {}).get("label", mode)
+    preset = PERIOD_PRESETS.get(mode, {})
+    key = "label_en" if lang == LANG_EN else "label"
+    return preset.get(key, mode)
+
+
+def _mode_note(mode: str, lang: str) -> str:
+    label = _mode_label(mode, lang)
+    if not label:
+        return ""
+    text = f"Time horizon: {label}" if lang == LANG_EN else f"判定期間: {label}モード"
+    return f'<p style="color:#888;font-size:12px;">{text}</p>'
 
 
 def _signal_dot(flag: bool) -> str:
     return "●" if flag else "○"
 
 
-SIGNAL_LEGEND_JA = (
-    '<p style="color:#888;font-size:12px;">'
-    "シグナルの見方: 「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
-    "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
-    "この選定は<strong>PEG(株価に対する利益成長率の割安度)を基準にランキング</strong>したもので、"
-    "シグナルは現在の値動きの状態を補足する参考情報です。"
-    "トレンドが既に下向き(デッドクロス)の銘柄は、割安に見えても値動きが弱い可能性があるため"
-    "注意してください。</p>"
-)
-SIGNAL_LEGEND_EN = (
-    '<p style="color:#888;font-size:12px;">'
-    "How to read the signals: \"Trend\" is a golden/dead cross (moving average crossover), "
-    "\"Momentum\" is RSI (overbought/oversold), and \"Volume\" compares against the normal "
-    "baseline. This selection is <strong>ranked by PEG ratio</strong> "
-    "(how undervalued the price is relative to earnings growth) — the signals are just "
-    "supplementary information about current price action. "
-    "A stock with an already-declining trend (dead cross) may be weak even if it looks "
-    "cheap, so please keep that in mind.</p>"
-)
+# トレンド/モメンタムの状態ごとの文言。buy_trendは「直近でゴールデンクロスした」か
+# 「既に上昇順に並んでいる(継続中)」かを区別せずTrueにしていたため、クロスから
+# かなり時間が経っていても「クロス発生」のように見えてしまう問題があった。
+# ここで両者を明示的に分けて伝える。
+_TREND_TEXT = {
+    "sell_cross": {LANG_JA: "🔴 デッドクロス発生(下降転換)", LANG_EN: "🔴 Dead cross (turning down)"},
+    "sell_alignment": {LANG_JA: "🔴 下降トレンド継続中", LANG_EN: "🔴 Downtrend continuing"},
+    "buy_cross": {LANG_JA: "🟢 ゴールデンクロス発生(直近)", LANG_EN: "🟢 Golden cross (recent)"},
+    "buy_alignment": {LANG_JA: "🟢 上昇トレンド継続中(直近のクロスではありません)",
+                       LANG_EN: "🟢 Uptrend continuing (not a recent cross)"},
+    "none": {LANG_JA: "⚪ 明確なトレンドなし", LANG_EN: "⚪ No clear trend"},
+}
 
 
 def _trend_text(detail: dict | None, lang: str) -> str:
-    """トレンドシグナルの状態を文言化する。
-    buy_trendは「直近でゴールデンクロスした」か「既に上昇順に並んでいる(継続中)」かを
-    区別せずTrueにしていたため、クロスからかなり時間が経っていても「クロス発生」のように
-    見えてしまう問題があった。ここで両者を明示的に分けて伝える。"""
     detail = detail or {}
-    if lang == LANG_EN:
-        if detail.get("sell_cross"):
-            return "🔴 Dead cross (turning down)"
-        if detail.get("sell_alignment"):
-            return "🔴 Downtrend continuing"
-        if detail.get("buy_cross"):
-            return "🟢 Golden cross (recent)"
-        if detail.get("buy_alignment"):
-            return "🟢 Uptrend continuing (not a recent cross)"
-        return "⚪ No clear trend"
-    if detail.get("sell_cross"):
-        return "🔴 デッドクロス発生(下降転換)"
-    if detail.get("sell_alignment"):
-        return "🔴 下降トレンド継続中"
-    if detail.get("buy_cross"):
-        return "🟢 ゴールデンクロス発生(直近)"
-    if detail.get("buy_alignment"):
-        return "🟢 上昇トレンド継続中(直近のクロスではありません)"
-    return "⚪ 明確なトレンドなし"
+    for key in ("sell_cross", "sell_alignment", "buy_cross", "buy_alignment"):
+        if detail.get(key):
+            return _TREND_TEXT[key][lang]
+    return _TREND_TEXT["none"][lang]
 
 
 def _momentum_text(sig: dict, lang: str) -> str:
     rsi = sig.get("rsi", "―")
-    if lang == LANG_EN:
-        if sig.get("sell_momentum"):
-            return f"🔴 Overbought (RSI {rsi})"
-        if sig.get("buy_momentum"):
-            return f"🟢 Oversold, possible dip (RSI {rsi})"
-        return f"⚪ Neutral (RSI {rsi})"
     if sig.get("sell_momentum"):
-        return f"🔴 買われすぎ(RSI {rsi})"
+        return f"🔴 買われすぎ(RSI {rsi})" if lang == LANG_JA else f"🔴 Overbought (RSI {rsi})"
     if sig.get("buy_momentum"):
-        return f"🟢 売られすぎ・押し目の可能性(RSI {rsi})"
-    return f"⚪ 中立(RSI {rsi})"
+        return (f"🟢 売られすぎ・押し目の可能性(RSI {rsi})" if lang == LANG_JA
+                else f"🟢 Oversold, possible dip (RSI {rsi})")
+    return f"⚪ 中立(RSI {rsi})" if lang == LANG_JA else f"⚪ Neutral (RSI {rsi})"
 
 
 def _signal_summary_html(sig: dict, lang: str = LANG_JA) -> str:
     trend = _trend_text(sig.get("trend_detail"), lang)
     momentum = _momentum_text(sig, lang)
-    if lang == LANG_EN:
-        volume = "🟢 Spiking" if sig.get("volume_high") else "⚪ Normal"
-        labels = ("Trend", "Momentum", "Volume")
-    else:
-        volume = "🟢 急増" if sig.get("volume_high") else "⚪ 平常"
-        labels = ("トレンド", "モメンタム", "出来高")
+    volume_state = t("volume_high", lang) if sig.get("volume_high") else t("volume_normal", lang)
+    volume = f"🟢 {volume_state}" if sig.get("volume_high") else f"⚪ {volume_state}"
     return (
         '<table style="border-collapse:collapse;font-size:13px;">'
-        f'<tr><td style="padding:2px 8px;">{labels[0]}</td><td style="padding:2px 8px;">{trend}</td></tr>'
-        f'<tr><td style="padding:2px 8px;">{labels[1]}</td><td style="padding:2px 8px;">{momentum}</td></tr>'
-        f'<tr><td style="padding:2px 8px;">{labels[2]}</td><td style="padding:2px 8px;">{volume}</td></tr>'
+        f'<tr><td style="padding:2px 8px;">{t("col_trend", lang)}</td><td style="padding:2px 8px;">{trend}</td></tr>'
+        f'<tr><td style="padding:2px 8px;">{t("col_momentum", lang)}</td><td style="padding:2px 8px;">{momentum}</td></tr>'
+        f'<tr><td style="padding:2px 8px;">{t("col_volume", lang)}</td><td style="padding:2px 8px;">{volume}</td></tr>'
         "</table>"
     )
 
@@ -145,11 +165,10 @@ def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = L
     """メールを見ている場でそのまま退会できるよう、登録ページの退会確認画面への
     リンクを直接張る(?delete_account=1は確認画面を表示するだけで、実際の削除は
     確認画面のボタンをもう一度押すまで実行されない)。"""
-    label = "Unsubscribe / delete account →" if lang == LANG_EN else "配信停止・退会はこちら →"
     return (
         f'<p style="margin:16px 0 0;font-size:12px;">'
         f'<a href="{register_base_url}?token={register_token}&amp;delete_account=1" style="color:#888;">'
-        f"{label}</a></p>"
+        f"{t('unsubscribe', lang)}</a></p>"
     )
 
 
@@ -157,15 +176,9 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
                            register_token: str, mode: str = "", lang: str = LANG_JA) -> str:
     """選定（買い時）レポート・週次"""
     register_form_url = f"{register_base_url}?token={register_token}"
-    label = _mode_label(mode, lang)
-    if lang == LANG_EN:
-        mode_note = f'<p style="color:#888;font-size:12px;">Time horizon: {label}</p>' if label else ""
-    else:
-        mode_note = f'<p style="color:#888;font-size:12px;">判定期間: {label}モード</p>' if label else ""
 
     if not ranked:
-        body_rows = ("<p>No stocks passed the screening criteria today.</p>" if lang == LANG_EN
-                     else "<p>本日、足切り条件を通過した銘柄はありませんでした。</p>")
+        body_rows = f"<p>{t('no_candidates', lang)}</p>"
     else:
         top = ranked[0]
         strongest = max(
@@ -187,45 +200,31 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
         for i, s in enumerate(ranked, 1):
             sig = signals_map.get(s["ticker"], {})
             if lang == LANG_EN:
-                cards.append(f"""
-                <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
-                  <p style="margin:4px 0;"><strong>#{i} {s['ticker']} — {s.get('company_name','')}</strong></p>
-                  <p style="margin:4px 0;">PEG: {s['peg']:.2f} | Earnings growth: +{s['earnings_growth']*100:.1f}%</p>
-                  {_signal_summary_html(sig, lang)}
-                  <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">Add to watchlist →</a></p>
-                  {_broker_links(s['ticker'], lang)}
-                </div>
-                """)
+                title = f"#{i} {s['ticker']} — {s.get('company_name','')}"
+                growth = f"PEG: {s['peg']:.2f} | Earnings growth: +{s['earnings_growth']*100:.1f}%"
             else:
-                cards.append(f"""
-                <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
-                  <p style="margin:4px 0;"><strong>【第{i}位】{s['ticker']} — {s.get('company_name','')}</strong></p>
-                  <p style="margin:4px 0;">PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%</p>
-                  {_signal_summary_html(sig, lang)}
-                  <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">この銘柄を監視リストに登録 →</a></p>
-                  {_broker_links(s['ticker'], lang)}
-                </div>
-                """)
-        legend = SIGNAL_LEGEND_EN if lang == LANG_EN else SIGNAL_LEGEND_JA
-        summary_label = "🔎 Summary" if lang == LANG_EN else "🔎 サマリー"
-        body_rows = f"<p>{summary_label}<br>{summary}</p>" + legend + "".join(cards)
-
-    if lang == LANG_EN:
-        heading = "📈 This week's buy-time picks"
-        other_ticker_link = f'<p><a href="{register_form_url}">Add another ticker via search →</a></p>'
-        disclaimer = DISCLAIMER_EN
-    else:
-        heading = "📈 今週の買い時レポート"
-        other_ticker_link = f'<p><a href="{register_form_url}">検索ボックスから他の銘柄を登録する →</a></p>'
-        disclaimer = DISCLAIMER_JA
+                title = f"【第{i}位】{s['ticker']} — {s.get('company_name','')}"
+                growth = f"PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%"
+            cards.append(f"""
+            <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
+              <p style="margin:4px 0;"><strong>{title}</strong></p>
+              <p style="margin:4px 0;">{growth}</p>
+              {_signal_summary_html(sig, lang)}
+              <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">{t('add_to_watchlist', lang)}</a></p>
+              {_broker_links(s['ticker'], lang)}
+            </div>
+            """)
+        body_rows = (f"<p>{t('summary_label', lang)}<br>{summary}</p>"
+                    + f'<p style="color:#888;font-size:12px;">{t("signal_legend", lang)}</p>'
+                    + "".join(cards))
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
-      <h2>{heading}</h2>
-      {mode_note}
+      <h2>{t('selection_heading', lang)}</h2>
+      {_mode_note(mode, lang)}
       {body_rows}
-      {other_ticker_link}
-      <p style="color:#888;font-size:12px;">{disclaimer}</p>
+      <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
+      <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {_unsubscribe_link(register_base_url, register_token, lang)}
     </body></html>
     """
@@ -261,62 +260,43 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
     for r in watchlist_results:
         sig = r["signals"]
         change_pct = (r["price"] - r["prev_close"]) / r["prev_close"] * 100 if r.get("prev_close") else 0
-        if lang == LANG_EN:
-            warn_items = []
-            if sig.get("sell_trend"):
-                warn_items.append("Dead cross")
-            if sig.get("sell_momentum"):
-                warn_items.append(f"RSI overbought ({sig.get('rsi')})")
-            warn_text = ", ".join(warn_items) if warn_items else "None"
-            blocks.append(f"""
-            <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
-              <p style="margin:4px 0;"><strong>{r['ticker']}: ${r['price']:.2f} ({change_pct:+.1f}% vs prev close)</strong></p>
-              <table style="border-collapse:collapse;font-size:13px;">
-                <tr><td></td><td style="padding:2px 8px;">Trend</td><td style="padding:2px 8px;">Momentum</td></tr>
-                <tr><td style="padding:2px 8px;">🟢 Buy</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_trend'))}</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_momentum'))}</td></tr>
-                <tr><td style="padding:2px 8px;">🔴 Sell</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_trend'))}</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_momentum'))}</td></tr>
-              </table>
-              <p style="margin:4px 0;">Volume: {'Spiking' if sig.get('volume_high') else 'Normal'} ({sig.get('volume_ratio')}x 20-day average)</p>
-              <p style="margin:4px 0;">Warnings: {warn_text}</p>
-              <p style="margin:4px 0;">PEG (reference): {r.get('peg','―')}</p>
-              {_broker_links(r['ticker'], lang)}
-            </div>
-            """)
-        else:
-            warn_items = []
-            if sig.get("sell_trend"):
-                warn_items.append("デッドクロス")
-            if sig.get("sell_momentum"):
-                warn_items.append(f"RSI買われすぎ({sig.get('rsi')})")
-            warn_text = "・".join(warn_items) if warn_items else "なし"
-            blocks.append(f"""
-            <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
-              <p style="margin:4px 0;"><strong>【{r['ticker']}】${r['price']:.2f}（前日比 {change_pct:+.1f}%）</strong></p>
-              <table style="border-collapse:collapse;font-size:13px;">
-                <tr><td></td><td style="padding:2px 8px;">トレンド</td><td style="padding:2px 8px;">モメンタム</td></tr>
-                <tr><td style="padding:2px 8px;">🟢買い</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_trend'))}</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_momentum'))}</td></tr>
-                <tr><td style="padding:2px 8px;">🔴売り</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_trend'))}</td>
-                    <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_momentum'))}</td></tr>
-              </table>
-              <p style="margin:4px 0;">出来高: {'急増' if sig.get('volume_high') else '平常'}（20日平均比{sig.get('volume_ratio')}倍）</p>
-              <p style="margin:4px 0;">警告: {warn_text}</p>
-              <p style="margin:4px 0;">PEG(参考): {r.get('peg','―')}</p>
-              {_broker_links(r['ticker'], lang)}
-            </div>
-            """)
 
-    label = _mode_label(mode, lang)
-    if lang == LANG_EN:
-        mode_note = f'<p style="color:#888;font-size:12px;">Time horizon: {label}</p>' if label else ""
-    else:
-        mode_note = f'<p style="color:#888;font-size:12px;">判定期間: {label}モード</p>' if label else ""
+        warn_items = []
+        if sig.get("sell_trend"):
+            warn_items.append(t("warn_dead_cross", lang))
+        if sig.get("sell_momentum"):
+            rsi_warn = f"RSI overbought ({sig.get('rsi')})" if lang == LANG_EN else f"RSI買われすぎ({sig.get('rsi')})"
+            warn_items.append(rsi_warn)
+        sep = ", " if lang == LANG_EN else "・"
+        warn_text = sep.join(warn_items) if warn_items else t("no_warnings", lang)
+
+        if lang == LANG_EN:
+            title = f"{r['ticker']}: ${r['price']:.2f} ({change_pct:+.1f}% vs prev close)"
+            volume_line = f"Volume: {t('volume_high', lang) if sig.get('volume_high') else t('volume_normal', lang)} ({sig.get('volume_ratio')}x 20-day average)"
+            warn_line = f"Warnings: {warn_text}"
+        else:
+            title = f"【{r['ticker']}】${r['price']:.2f}（前日比 {change_pct:+.1f}%）"
+            volume_line = f"出来高: {t('volume_high', lang) if sig.get('volume_high') else t('volume_normal', lang)}（20日平均比{sig.get('volume_ratio')}倍）"
+            warn_line = f"警告: {warn_text}"
+
+        blocks.append(f"""
+        <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
+          <p style="margin:4px 0;"><strong>{title}</strong></p>
+          <table style="border-collapse:collapse;font-size:13px;">
+            <tr><td></td><td style="padding:2px 8px;">{t('col_trend', lang)}</td><td style="padding:2px 8px;">{t('col_momentum', lang)}</td></tr>
+            <tr><td style="padding:2px 8px;">{t('row_buy', lang)}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_trend'))}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_momentum'))}</td></tr>
+            <tr><td style="padding:2px 8px;">{t('row_sell', lang)}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_trend'))}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_momentum'))}</td></tr>
+          </table>
+          <p style="margin:4px 0;">{volume_line}</p>
+          <p style="margin:4px 0;">{warn_line}</p>
+          <p style="margin:4px 0;">{t('peg_reference', lang)}: {r.get('peg','―')}</p>
+          {_broker_links(r['ticker'], lang)}
+        </div>
+        """)
 
     skipped_note = ""
     if skipped:
@@ -336,36 +316,18 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
     register_link = ""
     unsubscribe_link = ""
     if register_base_url and register_token:
-        if lang == LANG_EN:
-            register_link = (
-                f'<p><a href="{register_base_url}?token={register_token}">'
-                f"Add or remove stocks (open the registration page) →</a></p>"
-            )
-        else:
-            register_link = (
-                f'<p><a href="{register_base_url}?token={register_token}">'
-                f"銘柄を追加・削除する（登録ページを開く） →</a></p>"
-            )
+        register_link = f'<p><a href="{register_base_url}?token={register_token}">{t("register_link", lang)}</a></p>'
         unsubscribe_link = _unsubscribe_link(register_base_url, register_token, lang)
-
-    if lang == LANG_EN:
-        heading = "📊 Today's monitoring report"
-        summary_label = "🔎 Summary"
-        disclaimer = DISCLAIMER_EN
-    else:
-        heading = "📊 本日の監視レポート"
-        summary_label = "🔎 サマリー"
-        disclaimer = DISCLAIMER_JA
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
-      <h2>{heading}</h2>
-      {mode_note}
-      <p>{summary_label}<br>{summary}</p>
+      <h2>{t('monitoring_heading', lang)}</h2>
+      {_mode_note(mode, lang)}
+      <p>{t('summary_label', lang)}<br>{summary}</p>
       {''.join(blocks)}
       {skipped_note}
       {register_link}
-      <p style="color:#888;font-size:12px;">{disclaimer}</p>
+      <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {unsubscribe_link}
     </body></html>
     """

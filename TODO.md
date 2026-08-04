@@ -1,6 +1,32 @@
 # 残課題
 
-最終更新: 2026-08-03
+最終更新: 2026-08-04
+
+## 英語版追加後のリファクタリング（2026-08-04）
+
+英語版対応で`report.py`・`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`が
+複雑化したとの指摘を受け、`/simplify`スキルで4観点(再利用性・簡素化・効率性・抽象度)の
+並行レビューを実施し、見つかった問題を対応した。
+
+- **重複していた期間モードの英語ラベルを一本化**: `report.py`の`_MODE_LABEL_EN`と
+  register-stock側の`_PERIOD_PRESET_LABELS_EN`が同じ3モードの英語ラベルを別々に
+  持っていた。`config.py`の`PERIOD_PRESETS`各エントリに`label_en`・`description_en`を
+  追加し、両ファイルとも単一の情報源(config.py)を参照するように変更、ローカルの
+  重複辞書を削除
+- **`_CYCLE_LABEL`/`_SEND_FREQ_LABEL`をja/en一本化**: register-stock側で日本語版と
+  英語版が別々の辞書だったものを`{key: {"ja":..., "en":...}}`の単一辞書にまとめた
+- **register-stock Lambdaの冗長なDynamoDB読み取りを削減**: `handler()`が既に取得済みの
+  `token_item`を、`_is_valid_token()`(トークン再取得→削除しインライン判定に変更)・
+  `_set_user_lang()`・`_handle_confirm()`が個別に再取得していた。authしたリクエスト
+  1件につきDynamoDB読み取りが最大3回→1回に削減(Function URL経由のレイテンシ改善)
+- **`report.py`に文言の出し分けを集約する`T`辞書 + `t(key, lang)`ヘルパーを追加**:
+  見出し・ラベル・凡例・警告文言など、語順が言語間で変わらない単純な文言は全て
+  `T`辞書経由に統一。カード本文のように語順自体が言語で大きく異なる箇所
+  (銘柄カード・監視ブロック)は無理にテンプレート共通化せずja/en個別のままとした
+  (共通化すると条件分岐が増えてかえって読みにくくなるため、過剰な抽象化は避けた)
+- テスト(`test_report.py`・`test_register_handler.py`、計80件)は無修正のまま全件pass
+  (出力される文言・HTMLは1文字も変えていないことの裏付け)。`report.py`は差分で
+  正味-53行
 
 ## 英語版: レポート本文の英訳・米国向け証券リンク（2026-08-04）
 
