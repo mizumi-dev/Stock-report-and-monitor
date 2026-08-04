@@ -2,6 +2,29 @@
 
 最終更新: 2026-08-04
 
+## 【最優先】SES本番アクセス再却下への対応（2026-08-04）
+
+2回目の却下(具体的理由なしの定型文)を受けて対応中。
+
+- **重大な発見**: SESアカウントの`WebsiteURL`が、サービス開始前の古い値
+  (`https://github.com/mizumi-dev/Stock-report-and-monitor`)のまま残っていた。
+  返信文で正しいURL(`https://pegsignal.com/`)を伝えても、審査側が参照する
+  構造化データ自体は自動更新されない。`sesv2 put-account-details`で直接修正を
+  試みたが、却下後はAPIからロックされており更新不可(`ConflictException`)。
+  **AWSサポートに人力での修正+再審査を依頼する必要がある**。ユーザーが
+  サポートセンター(可能ならチャット/電話)へ相談予定
+- **未着手・最優先**: `pegsignal.com`にSPF・DMARCレコードを追加する。
+  現状`_amazonses.pegsignal.com`のTXT(SESドメイン検証)のみで、SPF・DMARCは
+  未設定と判明。審査側の信頼シグナルとして重要。追加するレコード:
+  - SPF(頂点`pegsignal.com`、既存TXTがあれば1つにマージ要): `v=spf1 include:amazonses.com ~all`
+  - DMARC(`_dmarc.pegsignal.com`): `v=DMARC1; p=none; rua=mailto:...`
+  - Route53の読み取り・書き込み権限(`route53:ListHostedZonesByName`・
+    `route53:ChangeResourceRecordSets`)が現在のデプロイ用IAMユーザーに無いため、
+    権限が追加され次第Claudeが登録する予定(それまでは手動追加も可)
+- **方針決定済み**: Resend等の外部メール配信サービスへの乗り換えは見送り、
+  AWS(SES)一本で解決する方針に確定(「外部依存を増やしたくない」との判断)。
+  送信処理の抽象化(プロバイダ切り替え可能にする改修)も同じ理由で保留
+
 ## 金商法(投資助言業)リスクの低減（2026-08-04）
 
 将来のマネタイズ(証券会社リンクのアフィリエイト化等)を見据え、「投資助言」に
