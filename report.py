@@ -16,8 +16,19 @@ LANG_EN = "en"
 # 単純な文言の出し分けはすべてここに集約する({キー: {ja:..., en:...}})。
 # カード本文のように語順自体が言語で変わる箇所は対象外(それぞれ個別にja/en分岐する)。
 T = {
-    "disclaimer": {LANG_JA: "※本レポートは投資助言ではありません",
-                   LANG_EN: "This report is not investment advice."},
+    "disclaimer": {
+        LANG_JA: (
+            "※本レポートは、公開データに機械的な計算式(PEGレシオ・移動平均・RSI等)を"
+            "適用した結果を機械的に表示するものであり、特定の銘柄の売買を推奨・勧誘する"
+            "ものではありません。投資判断は、ご自身の責任において行ってください。"
+        ),
+        LANG_EN: (
+            "This report mechanically applies fixed formulas (PEG ratio, moving averages, "
+            "RSI, etc.) to publicly available data. It does not recommend or solicit the "
+            "purchase or sale of any specific security. You are solely responsible for "
+            "your own investment decisions."
+        ),
+    },
     "summary_label": {LANG_JA: "🔎 サマリー", LANG_EN: "🔎 Summary"},
     "selection_heading": {LANG_JA: "📈 今週の買い時レポート", LANG_EN: "📈 This week's buy-time picks"},
     "monitoring_heading": {LANG_JA: "📊 本日の監視レポート", LANG_EN: "📊 Today's monitoring report"},
