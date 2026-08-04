@@ -532,9 +532,13 @@ def _render_terms(lang: str = LANG_JA) -> str:
     if lang == LANG_EN:
         return """
         <h3>Terms of Service</h3>
-        <p><strong>The reports and signals this service sends are not investment advice.</strong>
-        Information is based on external data (such as Yahoo Finance) and we do not guarantee its
-        accuracy or completeness. You are responsible for your own investment decisions.</p>
+        <p><strong>The reports and signals this service sends are not investment advice, and do
+        not recommend or solicit the purchase or sale of any specific security.</strong>
+        They mechanically apply fixed formulas (PEG ratio, moving averages, RSI, etc.) to
+        external data (such as Yahoo Finance), and we do not guarantee its accuracy or
+        completeness. This service is provided free of charge and does not offer individualized
+        advice tailored to your financial situation or investment objectives.
+        You are solely responsible for your own investment decisions.</p>
         <p>This is a free service intended for residents of Japan and the United States.
         <strong>Residents of the EEA, UK, and Switzerland are not supported.</strong></p>
         <p>Please keep your invite token (access link) to yourself. If we find evidence of abuse
@@ -547,9 +551,12 @@ def _render_terms(lang: str = LANG_JA) -> str:
         """
     return """
     <h3>利用規約</h3>
-    <p><strong>本サービスが配信するレポート・シグナルは投資助言ではありません。</strong>
-    情報はYahoo Finance等の外部データに基づいており、正確性・完全性を保証しません。
-    投資判断はご自身の責任で行ってください。</p>
+    <p><strong>本サービスが配信するレポート・シグナルは投資助言ではなく、特定の銘柄の
+    売買を推奨・勧誘するものでもありません。</strong>
+    公開データ(Yahoo Finance等)に機械的な計算式(PEGレシオ・移動平均・RSI等)を
+    適用した結果を機械的に表示するものであり、正確性・完全性を保証しません。
+    本サービスは無償で提供しており、利用者個々の資産状況・投資目的に応じた
+    個別の助言を行うものではありません。投資判断はご自身の責任で行ってください。</p>
     <p>本サービスは日本国内・米国在住の方を対象とする無料サービスです。
     <strong>欧州経済領域(EEA)・英国・スイス在住の方は対象外です。</strong></p>
     <p>招待トークン(アクセスリンク)はご自身で管理してください。不正利用・過度な自動アクセス等が
