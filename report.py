@@ -40,6 +40,7 @@ T = {
     "unsubscribe": {LANG_JA: "配信停止・退会はこちら →", LANG_EN: "Unsubscribe / delete account →"},
     "register_link": {LANG_JA: "銘柄を追加・削除する（登録ページを開く） →",
                       LANG_EN: "Add or remove stocks (open the registration page) →"},
+    "ai_prompt_link": {LANG_JA: "🤖 AIに分析してもらう →", LANG_EN: "🤖 Ask an AI to analyze →"},
     "col_trend": {LANG_JA: "トレンド", LANG_EN: "Trend"},
     "col_momentum": {LANG_JA: "モメンタム", LANG_EN: "Momentum"},
     "col_volume": {LANG_JA: "出来高", LANG_EN: "Volume"},
@@ -102,8 +103,10 @@ def _mode_note(mode: str, lang: str) -> str:
     return f'<p style="color:#888;font-size:12px;">{text}</p>'
 
 
-def _signal_dot(flag: bool) -> str:
-    return "●" if flag else "○"
+def _signal_dot(flag: bool, on_emoji: str) -> str:
+    """●/○(黒丸・白丸)は点灯有無が一目で分かりにくいとの指摘を受け、行の色
+    (買い行=🟢、売り行=🔴)に合わせた色付き丸に変更。消灯時は共通で⚪。"""
+    return on_emoji if flag else "⚪"
 
 
 # トレンド/モメンタムの状態ごとの文言。buy_trendは「直近でゴールデンクロスした」か
@@ -182,6 +185,18 @@ def _broker_links(ticker: str, lang: str = LANG_JA) -> str:
     )
 
 
+def _ai_prompt_link(register_base_url: str, ticker: str, lang: str = LANG_JA) -> str:
+    """気になった銘柄をAIに分析させたい利用者向けに、コピー用プロンプトを表示する
+    ページへのリンクを添える。register_base_url(register-stockのURL)を流用し、
+    トークンは不要(このページは利用者データを一切参照・変更しないため)。"""
+    lang_param = f"&amp;lang={lang}" if lang == LANG_EN else ""
+    return (
+        f'<p style="margin:4px 0;font-size:13px;">'
+        f'<a href="{register_base_url}?ai_prompt=1&amp;ticker={ticker}{lang_param}">'
+        f'{t("ai_prompt_link", lang)}</a></p>'
+    )
+
+
 def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = LANG_JA) -> str:
     """メールを見ている場でそのまま退会できるよう、登録ページの退会確認画面への
     リンクを直接張る(?delete_account=1は確認画面を表示するだけで、実際の削除は
@@ -235,6 +250,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
               {_signal_summary_html(sig, lang)}
               <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">{t('add_to_watchlist', lang)}</a></p>
               {_broker_links(s['ticker'], lang)}
+              {_ai_prompt_link(register_base_url, s['ticker'], lang)}
             </div>
             """)
         body_rows = (f"<p>{t('summary_label', lang)}<br>{summary}</p>"
@@ -312,16 +328,17 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
           <table style="border-collapse:collapse;font-size:13px;">
             <tr><td></td><td style="padding:2px 8px;">{t('col_trend', lang)}</td><td style="padding:2px 8px;">{t('col_momentum', lang)}</td></tr>
             <tr><td style="padding:2px 8px;">{t('row_buy', lang)}</td>
-                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_trend'))}</td>
-                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_momentum'))}</td></tr>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_trend'), "🟢")}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('buy_momentum'), "🟢")}</td></tr>
             <tr><td style="padding:2px 8px;">{t('row_sell', lang)}</td>
-                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_trend'))}</td>
-                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_momentum'))}</td></tr>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_trend'), "🔴")}</td>
+                <td style="padding:2px 8px;">{_signal_dot(sig.get('sell_momentum'), "🔴")}</td></tr>
           </table>
           <p style="margin:4px 0;">{volume_line}</p>
           <p style="margin:4px 0;">{warn_line}</p>
           <p style="margin:4px 0;">{t('peg_reference', lang)}: {r.get('peg','―')}</p>
           {_broker_links(r['ticker'], lang)}
+          {_ai_prompt_link(register_base_url, r['ticker'], lang) if register_base_url else ''}
         </div>
         """)
 

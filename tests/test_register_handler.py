@@ -617,3 +617,38 @@ class TestSignupsPaused:
         r = rh.handler(_event(), None)
         assert r["statusCode"] == 200
         assert "お申込み" in r["body"]
+
+
+class TestAiPrompt:
+    """レポートを見て気になった銘柄をAIに分析させたい利用者向けのプロンプト
+    コピーページ。トークン不要で使え、利用者データを一切読み書きしないことを確認する。"""
+
+    def test_ai_prompt_page_shows_ticker_and_copy_button(self, rh):
+        r = rh.handler(_event(ai_prompt="1", ticker="NVDA"), None)
+        assert r["statusCode"] == 200
+        assert "NVDA" in r["body"]
+        assert "クリップボードにコピー" in r["body"]
+        assert "navigator.clipboard.writeText" in r["body"]
+
+    def test_ai_prompt_page_works_without_token(self, rh):
+        r = rh.handler(_event(ai_prompt="1", ticker="AAPL"), None)
+        assert r["statusCode"] == 200
+
+    def test_ai_prompt_rejects_invalid_ticker(self, rh):
+        r = rh.handler(_event(ai_prompt="1", ticker="../../etc"), None)
+        assert r["statusCode"] == 400
+
+    def test_ai_prompt_page_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, ai_prompt="1", ticker="NVDA"), None)
+        assert "Copy to clipboard" in r["body"]
+        assert "クリップボードにコピー" not in r["body"]
+
+    def test_ai_prompt_page_respects_explicit_lang_query_param(self, rh):
+        """メールリンクに付与するlang=enクエリパラメータが、X-Site-Langヘッダー
+        (今回は日本語版ドメイン相当)より優先されることを確認する。"""
+        r = rh.handler(_event(ai_prompt="1", ticker="NVDA", lang="en"), None)
+        assert "Copy to clipboard" in r["body"]
+
+    def test_ai_prompt_disclaims_not_investment_advice(self, rh):
+        r = rh.handler(_event(ai_prompt="1", ticker="NVDA"), None)
+        assert "投資助言ではありません" in r["body"]

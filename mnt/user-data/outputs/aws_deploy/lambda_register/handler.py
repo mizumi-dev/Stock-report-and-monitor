@@ -793,6 +793,55 @@ _SEND_FREQ_LABEL = {
 }
 
 
+def _render_ai_prompt(ticker: str, lang: str = LANG_JA) -> str:
+    """レポートを見て気になった銘柄をAIに分析させたい利用者向けに、コピー用の
+    プロンプト文を表示するページ。メール本文はJavaScriptが動かない(Gmail等が
+    scriptタグを除去する)ため、コピーボタン自体はこのWebページ側に置く。
+    プロンプトは「客観的な分析」を依頼する内容にとどめ、売買の推奨・断定的な
+    結論を求める文言は避けている(本サービス自体が投資助言に該当しないための
+    方針と一貫させるため)。"""
+    t = html.escape(ticker)
+    if lang == LANG_EN:
+        prompt = (
+            f"Please provide an objective analysis of the stock {t}, covering its recent "
+            f"price trend, volume, and fundamental metrics such as P/E and PEG ratio. "
+            f"Focus on organizing decision-relevant information rather than giving a "
+            f"buy/sell recommendation."
+        )
+        prompt_escaped = html.escape(prompt)
+        return f"""
+        <h3>Ask an AI to analyze {t}</h3>
+        <p class="muted">Copy this prompt and paste it into your favorite AI assistant.</p>
+        <textarea readonly rows="6" style="width:100%;padding:8px;font-size:14px;"
+          id="ai-prompt-text">{prompt_escaped}</textarea>
+        <p><button type="button" onclick="
+          navigator.clipboard.writeText(document.getElementById('ai-prompt-text').value)
+            .then(() => {{ this.textContent = 'Copied!'; }});
+        ">Copy to clipboard</button></p>
+        <p class="muted">This prompt is provided for convenience only and is not investment
+        advice from PegSignal.</p>
+        <p><a href="?">Back</a></p>
+        """
+    prompt = (
+        f"{t}という銘柄について、直近の株価トレンド・出来高・PER・PEGレシオなどの"
+        f"テクニカル/ファンダメンタルズ指標を踏まえて客観的に分析してください。"
+        f"売買の推奨ではなく、判断材料となる情報の整理を目的としています。"
+    )
+    prompt_escaped = html.escape(prompt)
+    return f"""
+    <h3>{t}をAIに分析してもらう</h3>
+    <p class="muted">以下のプロンプトをコピーして、お好きなAIアシスタントに貼り付けてください。</p>
+    <textarea readonly rows="6" style="width:100%;padding:8px;font-size:14px;"
+      id="ai-prompt-text">{prompt_escaped}</textarea>
+    <p><button type="button" onclick="
+      navigator.clipboard.writeText(document.getElementById('ai-prompt-text').value)
+        .then(() => {{ this.textContent = 'コピーしました！'; }});
+    ">クリップボードにコピー</button></p>
+    <p class="muted">このプロンプトは利便性のために用意しているもので、PegSignalによる投資助言ではありません。</p>
+    <p><a href="?">戻る</a></p>
+    """
+
+
 def _render_info(token: str, lang: str = LANG_JA) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
@@ -1175,6 +1224,8 @@ def _classify_route(params: dict) -> str:
         return "contact"
     if params.get("info"):
         return "info"
+    if params.get("ai_prompt"):
+        return "ai_prompt"
     if params.get("lang") in SUPPORTED_LANGS:
         return "lang_switch"
     if params.get("delete_account_confirm"):
@@ -1242,6 +1293,19 @@ def handler(event, context):
         # トークン未所持でも仕組みの説明は読めるようにする(SEO・信頼性向上のため公開)。
         # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
         return _page(_render_info(token, lang), lang=lang)
+
+    if params.get("ai_prompt"):
+        # レポートメールの「AIに分析してもらう」リンクから来る。トークン不要で
+        # 誰でも使える(このページ自体は利用者データを一切参照・変更しないため)。
+        # このルートは他の言語切替ハンドラより前で分岐するため、lang=en等の
+        # 明示的なクエリパラメータをここで自前で反映する(レポート発行時のlangが
+        # X-Site-Langヘッダーだけでは伝わらないメールリンクからの遷移のため)
+        ai_lang = params.get("lang") if params.get("lang") in SUPPORTED_LANGS else lang
+        ticker = (params.get("ticker") or "").strip().upper()
+        if not TICKER_RE.match(ticker):
+            msg = "Invalid ticker." if ai_lang == LANG_EN else "無効なティッカーです。"
+            return _page(f"<p>{msg}</p>{_back_link(token)}", status=400, lang=ai_lang)
+        return _page(_render_ai_prompt(ticker, ai_lang), lang=ai_lang)
 
     if not (token_item and token_item.get("status") == TOKEN_STATUS_APPROVED):
         if not SIGNUPS_ENABLED:
