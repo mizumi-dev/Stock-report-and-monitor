@@ -180,3 +180,43 @@ def test_monitoring_report_is_english_when_lang_is_en():
     assert 'href="https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=AAPL"' in body
     assert 'href="https://robinhood.com/stocks/AAPL"' in body
     assert "Add or remove stocks" in body
+
+
+def test_selection_report_includes_ai_prompt_link():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert 'href="https://pegsignal.com/?ai_prompt=1&amp;ticker=NVDA"' in body
+    assert "AIに分析してもらう" in body
+
+
+def test_monitoring_report_includes_ai_prompt_link_when_register_url_provided():
+    watchlist_results = [{
+        "ticker": "AAPL", "price": 210.5, "prev_close": 208.0,
+        "signals": {"buy_trend": True, "buy_momentum": False, "sell_trend": False,
+                    "sell_momentum": False, "volume_high": False, "volume_ratio": 1.1},
+        "prev_signals": {},
+    }]
+    body = build_monitoring_report(watchlist_results, register_base_url="https://pegsignal.com/",
+                                    register_token="tok123")
+    assert 'href="https://pegsignal.com/?ai_prompt=1&amp;ticker=AAPL"' in body
+
+
+def test_monitoring_report_omits_ai_prompt_link_when_register_url_not_provided():
+    watchlist_results = [{
+        "ticker": "AAPL", "price": 210.5, "prev_close": 208.0,
+        "signals": {"buy_trend": True, "buy_momentum": False, "sell_trend": False,
+                    "sell_momentum": False, "volume_high": False, "volume_ratio": 1.1},
+        "prev_signals": {},
+    }]
+    body = build_monitoring_report(watchlist_results)
+    assert "ai_prompt=1" not in body
+
+
+def test_selection_report_ai_prompt_link_carries_lang_when_english():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,
+                            "trend_detail": {"buy_cross": True}}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+    assert 'href="https://pegsignal.com/?ai_prompt=1&amp;ticker=NVDA&amp;lang=en"' in body
