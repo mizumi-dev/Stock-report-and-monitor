@@ -13,17 +13,27 @@
   試みたが、却下後はAPIからロックされており更新不可(`ConflictException`)。
   **AWSサポートに人力での修正+再審査を依頼する必要がある**。ユーザーが
   サポートセンター(可能ならチャット/電話)へ相談予定
-- **未着手・最優先**: `pegsignal.com`にSPF・DMARCレコードを追加する。
-  現状`_amazonses.pegsignal.com`のTXT(SESドメイン検証)のみで、SPF・DMARCは
-  未設定と判明。審査側の信頼シグナルとして重要。追加するレコード:
-  - SPF(頂点`pegsignal.com`、既存TXTがあれば1つにマージ要): `v=spf1 include:amazonses.com ~all`
-  - DMARC(`_dmarc.pegsignal.com`): `v=DMARC1; p=none; rua=mailto:...`
-  - Route53の読み取り・書き込み権限(`route53:ListHostedZonesByName`・
-    `route53:ChangeResourceRecordSets`)が現在のデプロイ用IAMユーザーに無いため、
-    権限が追加され次第Claudeが登録する予定(それまでは手動追加も可)
+- **対応済み(2026-08-05)**: `pegsignal.com`にSPF・DMARCレコードをユーザーが
+  Route53コンソールから直接追加(IAM権限追加が必要なJSON方式は断念し、
+  コンソールのフォーム入力に切り替えて対応)。
+  - SPF(`pegsignal.com`、既存TXT無しのため単独追加): `v=spf1 include:amazonses.com ~all`
+  - DMARC(`_dmarc.pegsignal.com`): `v=DMARC1; p=none; rua=mailto:amsllr759@gmail.com`
+  - 反映まで数分〜数十分。DKIM(CNAMEレコード3件)は別途SESコンソールで
+    有効化状況の確認が望ましい(未確認)
 - **方針決定済み**: Resend等の外部メール配信サービスへの乗り換えは見送り、
   AWS(SES)一本で解決する方針に確定(「外部依存を増やしたくない」との判断)。
   送信処理の抽象化(プロバイダ切り替え可能にする改修)も同じ理由で保留
+- **新たに判明した代替ルート(未着手)**: Web調査([参考記事](https://github.com/purpom-media-lab/claude-ses-plugin/blob/main/README.md)・
+  [Qiita](https://qiita.com/daji110728/items/42d9ba5b2adc5b518e5c))により、
+  SESコンソールの「本稼働アクセスをリクエスト」(`put-account-details`、却下後
+  APIロックされ今は使えない)とは**別に**、**AWS Service Quotasから
+  「SES Daily Sending Quota」の引き上げを直接リクエストする方法**があり、
+  これが承認されると自動的にサンドボックスから外れることが分かった。
+  別の審査キューのため、今回のロックの影響を受けない可能性が高い。
+  **次にユーザーが試す予定**(Service Quotasコンソール → SESを検索 →
+  Desired Daily Sending Quota → 引き上げをリクエスト)
+- **申請文は英語の方が審査が早いとの情報あり**(前掲の参考記事より)。
+  Service Quotas経由の新規リクエストでは英語での記載を検討
 
 ## 金商法(投資助言業)リスクの低減（2026-08-04）
 
