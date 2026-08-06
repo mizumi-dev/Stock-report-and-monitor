@@ -40,6 +40,8 @@ T = {
     "register_link": {LANG_JA: "銘柄を追加・削除する（登録ページを開く） →",
                       LANG_EN: "Add or remove stocks (open the registration page) →"},
     "ai_prompt_link": {LANG_JA: "🤖 AIに分析してもらう →", LANG_EN: "🤖 Ask an AI to analyze →"},
+    "guide_link": {LANG_JA: "📖 はじめての方へ — 使い方ガイド（図でわかる説明） →",
+                   LANG_EN: "📖 New here? Read the illustrated how-to guide →"},
     "col_trend": {LANG_JA: "トレンド", LANG_EN: "Trend"},
     "col_momentum": {LANG_JA: "モメンタム", LANG_EN: "Momentum"},
     "col_volume": {LANG_JA: "出来高", LANG_EN: "Volume"},
@@ -212,6 +214,18 @@ def _ai_prompt_link(register_base_url: str, ticker: str, lang: str = LANG_JA) ->
     )
 
 
+def _guide_link(register_base_url: str, lang: str = LANG_JA) -> str:
+    """初めてレポートを受け取った人が用語やランプの意味で迷わないよう、
+    すべてのメールから使い方ガイドへ辿れるようにする。トークンは不要
+    (ガイドは利用者データを一切参照・変更しないため)。レポートを発行した言語は
+    X-Site-Langヘッダーでは伝わらないので、?lang=で明示的に引き継ぐ。"""
+    lang_param = f"&amp;lang={lang}" if lang == LANG_EN else ""
+    return (
+        f'<p style="margin:12px 0 0;font-size:13px;">'
+        f'<a href="{register_base_url}?guide=1{lang_param}">{t("guide_link", lang)}</a></p>'
+    )
+
+
 def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = LANG_JA) -> str:
     """メールを見ている場でそのまま退会できるよう、登録ページの退会確認画面への
     リンクを直接張る(?delete_account=1は確認画面を表示するだけで、実際の削除は
@@ -289,6 +303,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
       {_mode_note(mode, lang)}
       {body_rows}
       <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
+      {_guide_link(register_base_url, lang)}
       <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {_as_of_note(as_of, lang)}
       {_unsubscribe_link(register_base_url, register_token, lang)}
@@ -385,6 +400,9 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
 
     register_link = ""
     unsubscribe_link = ""
+    guide_link = ""
+    if register_base_url:
+        guide_link = _guide_link(register_base_url, lang)
     if register_base_url and register_token:
         register_link = f'<p><a href="{register_base_url}?token={register_token}">{t("register_link", lang)}</a></p>'
         unsubscribe_link = _unsubscribe_link(register_base_url, register_token, lang)
@@ -397,6 +415,7 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
       {''.join(blocks)}
       {skipped_note}
       {register_link}
+      {guide_link}
       <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {_as_of_note(as_of, lang)}
       {unsubscribe_link}
