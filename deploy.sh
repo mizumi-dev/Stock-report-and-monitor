@@ -15,13 +15,16 @@ set -euo pipefail
 
 # ---- 事前に書き換えてください ----
 export AWS_REGION="us-east-1"
-export SES_SENDER="noreply@pegsignal.com"       # pegsignal.comをSESでドメイン認証済み(TXT+DKIM)
-export SES_RECIPIENT="amsllr759@gmail.com"      # 事業用アドレス。レポート送付先(サンドボックスなら要検証)
+export SES_SENDER="noreply@pegsignal.com"       # メール送信元アドレス(pegsignal.comをResendでドメイン認証済み)
+export SES_RECIPIENT="amsllr759@gmail.com"      # 事業用アドレス。エラー通知・お問い合わせの宛先
+export RESEND_API_KEY=""                        # Resend(https://resend.com)のAPIキー。
+                                                 # SESの本番アクセス審査が繰り返し即時却下されたため、
+                                                 # mailer.py経由でResendを使うようにした
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
 # リポジトリのレイアウト（このスクリプトからの相対パス）
-DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py"
+DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py"
 REGISTER_DIR="mnt/user-data/outputs/aws_deploy/lambda_register"
 LAYER_ZIP="layer.zip"
 
@@ -52,9 +55,10 @@ aws dynamodb create-table \
   --key-schema AttributeName=token,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
 
-echo "=== 2. SESメールアドレス検証(自分でメール内リンクをクリックする必要あり) ==="
-aws ses verify-email-identity --email-address "$SES_SENDER" --region $AWS_REGION
-echo "→ $SES_SENDER 宛に確認メールが届きます。リンクをクリックして検証を完了してください。"
+echo "=== 2. メール送信ドメインの検証(Resend) ==="
+echo "→ SESは使わなくなったため、この手順はAWS側では行わない。"
+echo "   Resendダッシュボード(https://resend.com/domains)でpegsignal.comを追加し、"
+echo "   指示されるDNSレコード(SPF/DKIM)をRoute53に追加して検証を完了させること。"
 
 echo "=== 3. IAMロール作成 ==="
 cat > /tmp/lambda-trust-policy.json << 'EOF'
@@ -80,7 +84,6 @@ cat > /tmp/batch-policy.json << EOF
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
     {"Effect": "Allow", "Action": ["dynamodb:GetItem","dynamodb:Scan"],
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/approved_tokens"},
-    {"Effect": "Allow", "Action": ["ses:SendEmail"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
 }
@@ -103,7 +106,6 @@ cat > /tmp/register-policy.json << EOF
      "Resource": "arn:aws:dynamodb:$AWS_REGION:$ACCOUNT_ID:table/app_settings"},
     {"Effect": "Allow", "Action": ["lambda:InvokeFunction"],
      "Resource": "arn:aws:lambda:$AWS_REGION:$ACCOUNT_ID:function:daily-batch"},
-    {"Effect": "Allow", "Action": ["ses:SendEmail"], "Resource": "*"},
     {"Effect": "Allow", "Action": ["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents"], "Resource": "*"}
   ]
 }
@@ -166,7 +168,7 @@ aws lambda create-function \
   --zip-file fileb://daily_batch.zip \
   --timeout 900 --memory-size 512 \
   --layers "$LAYER_ARN" \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
     --zip-file fileb://daily_batch.zip --region $AWS_REGION
@@ -174,7 +176,7 @@ aws lambda create-function \
 echo "=== 7. register-stock Lambda 作成 + Function URL 発行 ==="
 rm -f register.zip
 (cd "$REGISTER_DIR" && zip "$OLDPWD/register.zip" handler.py > /dev/null)
-zip -j register.zip config.py > /dev/null
+zip -j register.zip config.py mailer.py > /dev/null
 
 aws lambda create-function \
   --function-name register-stock \
@@ -183,7 +185,7 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
@@ -233,13 +235,13 @@ echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを
 aws lambda update-function-configuration \
   --function-name daily-batch \
   --timeout 900 \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
   --region $AWS_REGION
 
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
 aws lambda update-function-configuration \
   --function-name register-stock \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
   --region $AWS_REGION
 
 echo "=== 9. EventBridge Scheduler 設定(毎営業日 米東部6:00、米国市場の寄り付き(9:30 ET)より前) ==="

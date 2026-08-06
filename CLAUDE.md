@@ -46,8 +46,13 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
   個々のユーザーが手動でレポート再送信ボタンを押しても、共有スナップショット
   (`signal_history`等)は上書きされない。この境界を壊す変更をしないこと
 - 2つのLambda間で共有しているロジックファイル: `report.py`・`config.py`・
-  `signals.py`・`ranking.py`・`data_sources.py`。片方だけ直して同期を忘れる
-  事故が起きやすいので、共有ファイルを変更したら両Lambda相当の挙動を確認する
+  `signals.py`・`ranking.py`・`data_sources.py`・`mailer.py`。片方だけ直して
+  同期を忘れる事故が起きやすいので、共有ファイルを変更したら両Lambda相当の
+  挙動を確認する
+- メール送信は`mailer.py`のResendMailer経由(Resend APIを使用)。SESの本番アクセス
+  審査が繰り返し即時却下され解決不能と判断し、2026-08-06に乗り換えた。
+  boto3のSESクライアントと同じ`send_email(Source=,Destination=,Message=,...)`
+  インターフェースを持たせているため、呼び出し側コードは変更不要
 - i18n: `report.py`の`T`辞書 + `t(key, lang)`ヘルパーで日英を管理。
   `LANG_JA`が既定
 
