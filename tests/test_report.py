@@ -151,6 +151,34 @@ def test_selection_report_is_english_when_lang_is_en():
     assert "楽天" not in body
 
 
+def test_selection_report_heading_varies_by_mode():
+    body_short = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="SHORT")
+    body_mid = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="MID")
+    body_long = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="LONG")
+
+    assert "本日のPEGスクリーニング結果" in body_short
+    assert "今週のPEGスクリーニング結果" in body_mid
+    assert "今月のPEGスクリーニング結果" in body_long
+
+
+def test_selection_report_heading_varies_by_mode_when_english():
+    body_short = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="SHORT", lang="en")
+    body_long = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="LONG", lang="en")
+
+    assert "Today's PEG screening results" in body_short
+    assert "This month's PEG screening results" in body_long
+
+
+def test_selection_subject_varies_by_mode():
+    from report import selection_subject
+
+    assert selection_subject("SHORT", "ja") == "📈 本日のPEGスクリーニング結果"
+    assert selection_subject("MID", "ja") == "📈 今週のPEGスクリーニング結果"
+    assert selection_subject("LONG", "ja") == "📈 今月のPEGスクリーニング結果"
+    assert selection_subject("SHORT", "en") == "📈 Today's PEG screening results"
+    assert selection_subject("", "ja") == "📈 今週のPEGスクリーニング結果"
+
+
 def test_selection_report_mode_label_is_english_when_lang_is_en():
     body = build_selection_report([], {}, "https://pegsignal.com/", "tok123", mode="SHORT", lang="en")
     assert "Time horizon: Short-term" in body
