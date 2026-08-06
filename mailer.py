@@ -35,6 +35,10 @@ class ResendMailer:
             headers={
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
+                # urllibの既定User-Agent("Python-urllib/x.y")だとResend側の
+                # Cloudflareにボット判定されブロックされた(HTTP 403, error code 1010)
+                # ため、明示的なUser-Agentを付与する
+                "User-Agent": "pegsignal-lambda/1.0",
             },
             method="POST",
         )
