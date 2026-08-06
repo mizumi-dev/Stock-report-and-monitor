@@ -23,6 +23,61 @@
 - この開発環境からは外部ネットワークへのアクセスが制限されており、動作確認は
   ユーザーの実機ブラウザで実施した
 
+## CI/CD自動デプロイパイプラインの構築（2026-08-06）
+
+`deploy.sh`は整備済みだが実行はAWS CLIを手で叩く運用で、masterマージ後の
+反映漏れが起きやすかった(TODO#12として記録済みの残件)。
+
+- **対応済み**: GitHub ActionsからAWSへの長期アクセスキーを一切持たせず、
+  OIDC連携でmasterブランチからのみ一時的にAssumeRoleできる構成にした。
+  - IAM OIDCプロバイダー(`token.actions.githubusercontent.com`)を新規作成
+  - `github-actions-deploy-role`ロールを作成。信頼ポリシーは
+    `repo:mizumi-dev/Stock-report-and-monitor:ref:refs/heads/master`に限定
+  - インラインポリシーで`lambda:UpdateFunctionCode`・`lambda:GetFunction`のみを
+    `daily-batch`・`register-stock`の2関数ARNに限定して付与(それ以外のAWS操作は
+    一切できない最小権限)
+  - `.github/workflows/deploy.yml`を新規作成。既存の`tests.yml`がmaster上で
+    成功した直後にのみ`workflow_run`で発火し、`deploy.sh`と同じzip構成
+    (daily-batch: handler.py+config.py+signals.py+data_sources.py+ranking.py+report.py、
+    register-stock: lambda_register/handler.py+config.py)で両Lambdaの
+    コードを更新する
+  - **IAM作業のため一時的に`claude-deploy`ユーザーに`IAMFullAccess`(AWS管理
+    ポリシー)をアタッチしてもらった。作業完了後はデタッチを依頼する**
+    (このプロジェクトの「使い終わったら消す」運用方針に沿う)
+- **対象外(意図的)**: DynamoDBテーブル作成・IAMロール作成・Lambda Layer公開・
+  Function URL設定などの初回セットアップ手順は`deploy.sh`のまま。CI/CDが
+  自動化するのはコード更新のみで、インフラ変更は引き続き手動で意図的に行う
+- 実際にmasterへマージした際の動作確認は次回のマージ時に実施予定
+
+## 開発体験・運用ルールの整備（2026-08-06）
+
+セキュリティインシデントを受けて「最新の知見をどう運用に落とし込むか」を検討した流れで、
+プロジェクト運用ルールを口頭確認のたびに再説明しなくて済むよう明文化。
+
+- **対応済み**: `CLAUDE.md`を新設。プロジェクト概要・対象指数拡張予定
+  (NASDAQ100の次はS&P500・NYダウ・日経225を予定)・セキュリティ方針
+  (リポジトリは既定で非公開、ユーザー指示時のみ公開／IAMインラインポリシーは
+  権限があれば自分で作成してよい)・アーキテクチャ・デプロイ・開発フロー・
+  テストの各節を記載。内容は事前にユーザーレビュー済み
+- **対応済み**: セッション開始時に`requirements-dev.txt`(yfinance/pandas/pytest/boto3)を
+  自動インストールする`.claude/hooks/session-start.sh`を追加、`.claude/settings.json`に
+  登録(Claude Code on the web限定、同期モード)。daily-batch側のテストがpandas/yfinance
+  依存で、手動`pip install`を忘れると構文チェックしかできない状態になっていた問題への対応。
+  PR #19で提出
+- **試行→撤回**: ダッシュボード(Artifact)を「`TODO.md`を正本として機械的に複製する」
+  方式に一度変更したが、ロードマップ・PR一覧・完了/バックログをキュレーションした
+  従来の見やすい形式に戻したいとの判断で撤回。ダッシュボードは引き続きClaudeが
+  適宜要約して更新する運用のまま(`CLAUDE.md`の記載も元に戻した)
+
+## UI改善: 選定レポートの見出し・件名をモード別に出し分け（2026-08-06）
+
+- **対応済み**: 選定レポートの見出し・メール件名が短期/中期/長期どのモードでも
+  「今週のPEGスクリーニング結果」固定だったのを、SHORT→「本日の」、MID→「今週の」、
+  LONG→「今月の」PEGスクリーニング結果、と判定期間モードに応じて出し分けるよう修正
+  (`report.py`の`selection_subject(mode, lang)`)
+- あわせて`handler.py`内で2箇所ハードコードされていた件名文言を`selection_subject()`に
+  一本化し重複を解消。テスト4件追加、全140件pass。PR #20で提出
+
 ## 【セキュリティインシデント】リポジトリが公開設定で機密情報が露出していた（2026-08-05）
 
 ユーザーからの「機密情報が含まれていないか」という確認をきっかけに発覚。
@@ -849,17 +904,27 @@ lambda:InvokeFunctionUrl action`で拒否された。これはCLIの制限では
 各期間モードの MACD パラメータ（`macd_fast`/`macd_slow`/`macd_signal`）も定義済みなので、
 切り替えUIを足せば動く状態にはなっている。ただし判定ロジックの妥当性は未検証。
 
-### 12. デプロイの自動化
+### 12. デプロイの自動化 — 対応済み（2026-08-06）
 
 現在は AWS CLI を手で叩いている。`deploy.sh` は整備済みだが CI/CD パイプラインはない。
+
+→ GitHub ActionsからOIDC連携でLambda 2本のコードを自動デプロイするパイプラインを
+構築(詳細は上部「CI/CD自動デプロイパイプラインの構築」参照、PR #21)。
 
 ---
 
 ## 備考: 秘密情報の扱い
 
 開発中、AWSアクセスキーや招待トークンをチャット・平文ファイルでやり取りした。
-個人利用の現状では許容範囲だが、公開サービス化を見据えるなら
-Secrets Manager / SSM Parameter Store への移行を検討すること。
+
+**再調査の結果(2026-08-06)、対応不要と判明**: Lambdaの環境変数(`SES_SENDER`・
+`SES_RECIPIENT`・`TOP_N`等)は秘密情報ではなく、コード中の「token」はDynamoDB管理の
+招待トークン変数名で、ハードコードされた認証情報はコード・環境変数のどこにも
+存在しない。「Secrets Managerへの移行」という対応は的外れで、実際の問題は
+**開発セッション中にAWS認証情報をチャット・平文ファイルで共有してしまう運用**
+そのものだった(2026-08-05のセキュリティインシデントの根本原因もこれ)。
+対応は既に`.gitignore`のパターン追加で実施済み。今後も同様の運用(チャット・
+リポジトリへの平文での認証情報記載)を避けることを徹底する。
 
 なお開発用の一時IAMユーザー（`diag-readonly-temp`, `deploy-temp`）は削除済み。
 `claude-deploy` は常設のデプロイ用ユーザーとして残してある。
