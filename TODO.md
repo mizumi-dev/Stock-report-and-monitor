@@ -1,6 +1,32 @@
 # 残課題
 
-最終更新: 2026-08-05
+最終更新: 2026-08-06
+
+## CI/CD自動デプロイパイプラインの構築（2026-08-06）
+
+`deploy.sh`は整備済みだが実行はAWS CLIを手で叩く運用で、masterマージ後の
+反映漏れが起きやすかった(TODO#12として記録済みの残件)。
+
+- **対応済み**: GitHub ActionsからAWSへの長期アクセスキーを一切持たせず、
+  OIDC連携でmasterブランチからのみ一時的にAssumeRoleできる構成にした。
+  - IAM OIDCプロバイダー(`token.actions.githubusercontent.com`)を新規作成
+  - `github-actions-deploy-role`ロールを作成。信頼ポリシーは
+    `repo:mizumi-dev/Stock-report-and-monitor:ref:refs/heads/master`に限定
+  - インラインポリシーで`lambda:UpdateFunctionCode`・`lambda:GetFunction`のみを
+    `daily-batch`・`register-stock`の2関数ARNに限定して付与(それ以外のAWS操作は
+    一切できない最小権限)
+  - `.github/workflows/deploy.yml`を新規作成。既存の`tests.yml`がmaster上で
+    成功した直後にのみ`workflow_run`で発火し、`deploy.sh`と同じzip構成
+    (daily-batch: handler.py+config.py+signals.py+data_sources.py+ranking.py+report.py、
+    register-stock: lambda_register/handler.py+config.py)で両Lambdaの
+    コードを更新する
+  - **IAM作業のため一時的に`claude-deploy`ユーザーに`IAMFullAccess`(AWS管理
+    ポリシー)をアタッチしてもらった。作業完了後はデタッチを依頼する**
+    (このプロジェクトの「使い終わったら消す」運用方針に沿う)
+- **対象外(意図的)**: DynamoDBテーブル作成・IAMロール作成・Lambda Layer公開・
+  Function URL設定などの初回セットアップ手順は`deploy.sh`のまま。CI/CDが
+  自動化するのはコード更新のみで、インフラ変更は引き続き手動で意図的に行う
+- 実際にmasterへマージした際の動作確認は次回のマージ時に実施予定
 
 ## 【セキュリティインシデント】リポジトリが公開設定で機密情報が露出していた（2026-08-05）
 
