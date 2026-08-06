@@ -5,6 +5,35 @@
 
 最終更新: 2026-08-06
 
+## CI/CD自動デプロイパイプラインの構築（2026-08-06、完了）
+
+`deploy.sh`は整備済みだが実行はAWS CLIを手で叩く運用で、masterマージ後の
+反映漏れが起きやすかった(TODO#12として記録済みの残件)。
+
+- GitHub ActionsからAWSへの長期アクセスキーを一切持たせず、OIDC連携で
+  masterブランチからのみ一時的にAssumeRoleできる構成にした。
+  - IAM OIDCプロバイダー(`token.actions.githubusercontent.com`)を新規作成
+  - `github-actions-deploy-role`ロールを作成
+  - インラインポリシーで`lambda:UpdateFunctionCode`・`lambda:GetFunction`のみを
+    `daily-batch`・`register-stock`の2関数ARNに限定して付与(それ以外のAWS操作は
+    一切できない最小権限)
+  - `.github/workflows/deploy.yml`を新規作成。既存の`tests.yml`がmaster上で
+    成功した直後にのみ`workflow_run`で発火し、`deploy.sh`と同じzip構成で
+    両Lambdaのコードを更新する
+- PR #21マージ後の初回自動デプロイが
+  `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`
+  で失敗した件。CloudTrailで実際のOIDCトークンの`sub`クレームを確認したところ、
+  想定していた`repo:OWNER/REPO:ref:...`ではなく、アカウントID・リポジトリIDが
+  付与された`repo:mizumi-dev@199311410/Stock-report-and-monitor@1319011790:ref:refs/heads/master`
+  という非標準の形式だった(この環境固有の挙動)。信頼ポリシーの`sub`条件を
+  実際の値に合わせて修正し解消。以降のPR(#25・#26・#27・#28)のマージで
+  自動デプロイが正常動作することを確認済み
+- 検証用に一時的に`claude-deploy`ユーザーへアタッチしていた`IAMFullAccess`
+  (AWS管理ポリシー)は、ユーザーがデタッチ済み(2026-08-06)
+- **対象外(意図的)**: DynamoDBテーブル作成・IAMロール作成・Lambda Layer公開・
+  Function URL設定などの初回セットアップ手順は`deploy.sh`のまま。CI/CDが
+  自動化するのはコード更新のみで、インフラ変更は引き続き手動で意図的に行う
+
 ## メール配信をSESからResendへ乗り換え（2026-08-06、完了）
 
 SESの本番アクセス審査が、us-east-1(2回却下)・大阪ap-northeast-3(正しい情報で
