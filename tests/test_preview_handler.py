@@ -1,0 +1,170 @@
+"""
+landing-preview Lambda(mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py)の
+コンポーネントテスト。register-stockとは別の独立したLambdaで、メールアドレスを
+登録したくない訪問者向けに、3モード分の選定レポートを登録不要で閲覧できる
+読み取り専用ページを提供する(2026-08-06追加)。
+
+daily-batch/register-stockと同名の"handler.py"があるため、モジュール名衝突を
+避けるべくimportlib.util.spec_from_file_locationで明示的な別名としてロードする。
+"""
+import importlib.util
+import re
+import sys
+from pathlib import Path
+from unittest import mock
+
+import pytest
+
+from fake_dynamodb import FakeDynamoDBResource
+
+PREVIEW_HANDLER_PATH = (
+    Path(__file__).resolve().parent.parent
+    / "mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py"
+)
+
+
+@pytest.fixture
+def ph():
+    """テストごとに新しいモジュールインスタンスと空のfake DynamoDBを用意する"""
+    spec = importlib.util.spec_from_file_location("preview_handler", PREVIEW_HANDLER_PATH)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["preview_handler"] = module
+    with mock.patch("boto3.resource"):
+        spec.loader.exec_module(module)
+
+    fake = FakeDynamoDBResource({"app_settings": ("key", None)})
+    module.dynamodb = fake
+    module.REGISTER_URL = "https://pegsignal.com/"
+    return module
+
+
+def _put_snapshot(ph, mode, ranked=None, signals_map=None, as_of="2026-08-06"):
+    ranked = ranked if ranked is not None else [
+        {"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2,
+         "earnings_growth": 0.3, "market_cap": 1e12},
+    ]
+    signals_map = signals_map if signals_map is not None else {
+        "NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+    }
+    ph.dynamodb.Table("app_settings").put_item(Item={
+        "key": f"selection_snapshot#{mode}",
+        "ranked": ranked, "signals_map": signals_map, "as_of_date": as_of,
+    })
+
+
+def _event(_headers=None, **params):
+    event = {"queryStringParameters": {k: v for k, v in params.items() if v is not None}}
+    if _headers:
+        event["headers"] = _headers
+    return event
+
+
+class TestPreviewPage:
+    def test_page_is_accessible_without_any_params(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(), None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "text/html; charset=utf-8"
+
+    def test_all_three_modes_render_in_a_single_response(self, ph):
+        """JSでの出し分けではなく、3モード分すべてが1回のレスポンスに含まれること
+        (クローラーがJSを実行しなくても全内容を取得できるようにするため)"""
+        _put_snapshot(ph, "SHORT", ranked=[{"ticker": "AAA", "company_name": "A社", "peg": 1.0,
+                                            "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"AAA": {"buy_trend": True}})
+        _put_snapshot(ph, "MID", ranked=[{"ticker": "BBB", "company_name": "B社", "peg": 1.0,
+                                          "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"BBB": {"buy_trend": True}})
+        _put_snapshot(ph, "LONG", ranked=[{"ticker": "CCC", "company_name": "C社", "peg": 1.0,
+                                           "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"CCC": {"buy_trend": True}})
+        body = ph.handler(_event(), None)["body"]
+        assert "AAA" in body and "BBB" in body and "CCC" in body
+
+    def test_mode_anchors_exist_for_in_page_navigation(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert 'id="short"' in body
+        assert 'id="mid"' in body
+        assert 'id="long"' in body
+        assert 'href="#short"' in body
+        assert 'href="#mid"' in body
+        assert 'href="#long"' in body
+
+    def test_missing_snapshot_does_not_crash(self, ph):
+        """サービス開始直後などバッチが一度も走っていないモードがあっても502にしない"""
+        r = ph.handler(_event(), None)
+        assert r["statusCode"] == 200
+
+    def test_shows_as_of_date_from_snapshot(self, ph):
+        _put_snapshot(ph, "SHORT", as_of="2026-08-05")
+        body = ph.handler(_event(), None)["body"]
+        assert "2026-08-05時点のデータです" in body
+
+    def test_no_per_ticker_watchlist_link_without_registration(self, ph):
+        """未登録の訪問者にはトークンが無いため、個別銘柄の「監視リストに登録」
+        リンクは出さない(report.render_selection_cardsのregister_token=None動作)"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert "監視リストに登録" not in body
+
+    def test_signup_cta_links_to_production_register_url(self, ph):
+        """実際の登録処理は複製せず、本番register-stockへリンクするだけ"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert 'href="https://pegsignal.com/"' in body
+
+    def test_broker_and_ai_prompt_links_work_without_token(self, ph):
+        """証券会社リンク・AIプロンプトリンクはトークン不要で機能する既存の設計を
+        プレビューページでも引き継いでいること"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert "moomoo.com" in body
+        assert "ai_prompt=1" in body
+
+
+class TestPreviewLanguage:
+    def test_english_when_lang_param_is_en(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(lang="en"), None)
+        assert '<html lang="en"' in r["body"]
+        assert "Sign up (free)" in r["body"]
+
+    def test_english_when_site_lang_header_is_en(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(_headers={"x-site-lang": "en"}), None)
+        assert '<html lang="en"' in r["body"]
+
+    def test_japanese_by_default(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(), None)
+        assert '<html lang="ja"' in r["body"]
+
+    def test_no_japanese_leaks_into_english_page(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        visible = re.sub(r"<style>.*?</style>", "", body, flags=re.S)
+        assert not re.search(r"[ぁ-んァ-ン一-龥]", visible)
+
+
+class TestPreviewReadOnly:
+    """このLambdaは読み取り専用であることが設計上の要件(CLAUDE.mdの
+    「バッチが計算し正本を保有、ボタン押下は読み取り専用」の原則をこの新画面にも適用)。
+    書き込み系のDynamoDB APIを一切呼ばないことをfakeの呼び出し履歴で確認する。"""
+
+    def test_never_calls_put_item_or_delete_item(self, ph):
+        _put_snapshot(ph, "SHORT")
+        table = ph.dynamodb.Table("app_settings")
+        with mock.patch.object(table, "put_item", wraps=table.put_item) as put_spy, \
+             mock.patch.object(table, "delete_item", wraps=table.delete_item) as del_spy:
+            ph.handler(_event(), None)
+            put_spy.assert_not_called()
+            del_spy.assert_not_called()
+
+

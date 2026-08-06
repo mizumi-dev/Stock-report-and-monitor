@@ -40,6 +40,13 @@ jobs:
           (cd mnt/user-data/outputs/aws_deploy/lambda_register && zip "$OLDPWD/register.zip" handler.py)
           zip -j register.zip config.py mailer.py
 
+      # landing-preview: メールアドレスを登録したくない訪問者向けの、登録不要な
+      # プレビューページ(本番register-stockとは別のLambda・別のURL、2026-08-06追加)
+      - name: Build landing-preview zip
+        run: |
+          (cd mnt/user-data/outputs/aws_deploy/lambda_preview && zip "$OLDPWD/preview.zip" handler.py)
+          zip -j preview.zip config.py report.py
+
       - name: Deploy daily-batch
         run: |
           aws lambda update-function-code --function-name daily-batch \
@@ -49,3 +56,8 @@ jobs:
         run: |
           aws lambda update-function-code --function-name register-stock \
             --zip-file fileb://register.zip --region "$AWS_REGION"
+
+      - name: Deploy landing-preview
+        run: |
+          aws lambda update-function-code --function-name landing-preview \
+            --zip-file fileb://preview.zip --region "$AWS_REGION"

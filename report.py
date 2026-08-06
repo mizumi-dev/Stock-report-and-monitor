@@ -237,65 +237,82 @@ def _unsubscribe_link(register_base_url: str, register_token: str, lang: str = L
     )
 
 
+def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_url: str,
+                           lang: str = LANG_JA, register_token: str | None = None) -> str:
+    """選定レポートの本文(サマリー+銘柄カード一覧)のHTMLを組み立てる。
+    メール本文(build_selection_report)と、ウェブの未登録訪問者向けプレビュー
+    ページ(register-stockの?preview=1)の両方から使う共通部品。
+
+    register_tokenがあれば「この銘柄を監視リストに登録」の個別リンクを付ける
+    (メール本文・登録済み利用者向け)。Noneならその行を省略する(未登録の
+    プレビュー訪問者はまだトークンを持たないため、個別銘柄への操作はできない)。"""
+    register_form_url = f"{register_base_url}?token={register_token}" if register_token else ""
+
+    if not ranked:
+        return f"<p>{t('no_candidates', lang)}</p>"
+
+    top = ranked[0]
+    # 「シグナルが最も強い」は買いシグナル(buy_trend・buy_momentum)のみを数える。
+    # volume_highは買い/売りの方向を持たない参考指標のため対象外(_render_info参照)。
+    # 以前はsell系も同じ重みで数えており、デッドクロス等の警告銘柄を誤って
+    # 「シグナルが最も強い」と紹介してしまうバグがあった。
+    buy_counts = {
+        s["ticker"]: sum(
+            1 for k in ("buy_trend", "buy_momentum") if signals_map.get(s["ticker"], {}).get(k)
+        )
+        for s in ranked
+    }
+    max_count = max(buy_counts.values())
+    strongest_tickers = [s["ticker"] for s in ranked if buy_counts[s["ticker"]] == max_count]
+
+    if max_count == 0:
+        strongest_note = ("No stock currently shows a buy signal." if lang == LANG_EN
+                          else "現在、買いシグナルが点灯している銘柄はありません。")
+    elif lang == LANG_EN:
+        strongest_note = f"Strongest signals: {' / '.join(strongest_tickers)}."
+    else:
+        strongest_note = f"シグナルが最も強いのは {'・'.join(strongest_tickers)} です。"
+
+    if lang == LANG_EN:
+        summary = f"Top by PEG: {top['ticker']} (PEG {top['peg']:.2f}). {strongest_note}"
+    else:
+        summary = f"PEG最上位は {top['ticker']}（PEG {top['peg']:.2f}）。{strongest_note}"
+
+    cards = []
+    for i, s in enumerate(ranked, 1):
+        sig = signals_map.get(s["ticker"], {})
+        if lang == LANG_EN:
+            title = f"#{i} {s['ticker']} — {s.get('company_name','')}"
+            growth = f"PEG: {s['peg']:.2f} | Earnings growth: +{s['earnings_growth']*100:.1f}%"
+        else:
+            title = f"【第{i}位】{s['ticker']} — {s.get('company_name','')}"
+            growth = f"PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%"
+        watchlist_link = (
+            f'<p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s["ticker"]}">'
+            f'{t("add_to_watchlist", lang)}</a></p>'
+        ) if register_token else ""
+        cards.append(f"""
+        <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
+          <p style="margin:4px 0;"><strong>{title}</strong></p>
+          <p style="margin:4px 0;">{growth}</p>
+          {_signal_summary_html(sig, lang)}
+          {watchlist_link}
+          {_broker_links(s['ticker'], lang)}
+          {_ai_prompt_link(register_base_url, s['ticker'], lang)}
+        </div>
+        """)
+    return (f"<p>{t('summary_label', lang)}<br>{summary}</p>"
+           + f'<p style="color:#888;font-size:12px;">{t("signal_legend", lang)}</p>'
+           + "".join(cards))
+
+
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
                            register_token: str, mode: str = "", lang: str = LANG_JA,
                            as_of: str | None = None) -> str:
     """選定（PEGスクリーニング）レポート・週次。as_ofを渡すと「◯月◯日時点のデータです」の
     注記を末尾に付ける(レポート即時発行ボタンが保存済みスナップショットを送る際に使う)。"""
     register_form_url = f"{register_base_url}?token={register_token}"
-
-    if not ranked:
-        body_rows = f"<p>{t('no_candidates', lang)}</p>"
-    else:
-        top = ranked[0]
-        # 「シグナルが最も強い」は買いシグナル(buy_trend・buy_momentum)のみを数える。
-        # volume_highは買い/売りの方向を持たない参考指標のため対象外(_render_info参照)。
-        # 以前はsell系も同じ重みで数えており、デッドクロス等の警告銘柄を誤って
-        # 「シグナルが最も強い」と紹介してしまうバグがあった。
-        buy_counts = {
-            s["ticker"]: sum(
-                1 for k in ("buy_trend", "buy_momentum") if signals_map.get(s["ticker"], {}).get(k)
-            )
-            for s in ranked
-        }
-        max_count = max(buy_counts.values())
-        strongest_tickers = [s["ticker"] for s in ranked if buy_counts[s["ticker"]] == max_count]
-
-        if max_count == 0:
-            strongest_note = ("No stock currently shows a buy signal." if lang == LANG_EN
-                              else "現在、買いシグナルが点灯している銘柄はありません。")
-        elif lang == LANG_EN:
-            strongest_note = f"Strongest signals: {' / '.join(strongest_tickers)}."
-        else:
-            strongest_note = f"シグナルが最も強いのは {'・'.join(strongest_tickers)} です。"
-
-        if lang == LANG_EN:
-            summary = f"Top by PEG: {top['ticker']} (PEG {top['peg']:.2f}). {strongest_note}"
-        else:
-            summary = f"PEG最上位は {top['ticker']}（PEG {top['peg']:.2f}）。{strongest_note}"
-
-        cards = []
-        for i, s in enumerate(ranked, 1):
-            sig = signals_map.get(s["ticker"], {})
-            if lang == LANG_EN:
-                title = f"#{i} {s['ticker']} — {s.get('company_name','')}"
-                growth = f"PEG: {s['peg']:.2f} | Earnings growth: +{s['earnings_growth']*100:.1f}%"
-            else:
-                title = f"【第{i}位】{s['ticker']} — {s.get('company_name','')}"
-                growth = f"PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%"
-            cards.append(f"""
-            <div style="border:1px solid #ddd;border-radius:8px;padding:12px;margin:10px 0;">
-              <p style="margin:4px 0;"><strong>{title}</strong></p>
-              <p style="margin:4px 0;">{growth}</p>
-              {_signal_summary_html(sig, lang)}
-              <p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s['ticker']}">{t('add_to_watchlist', lang)}</a></p>
-              {_broker_links(s['ticker'], lang)}
-              {_ai_prompt_link(register_base_url, s['ticker'], lang)}
-            </div>
-            """)
-        body_rows = (f"<p>{t('summary_label', lang)}<br>{summary}</p>"
-                    + f'<p style="color:#888;font-size:12px;">{t("signal_legend", lang)}</p>'
-                    + "".join(cards))
+    body_rows = render_selection_cards(ranked, signals_map, register_base_url, lang, register_token)
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">

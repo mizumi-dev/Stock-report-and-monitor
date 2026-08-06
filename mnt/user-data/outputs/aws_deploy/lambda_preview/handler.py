@@ -1,0 +1,213 @@
+"""
+landing-preview Lambda ハンドラ
+
+メールアドレスを登録したくない訪問者にも継続的な価値を提供するため、短期・中期・
+長期の選定レポートをその場でウェブページとして閲覧できるようにする「読み取り専用の
+ランディングページ」。register-stockとは別のLambda・別のFunction URLとして
+デプロイし、本番(register-stock)には一切手を加えない(2026-08-06、独立したテスト
+展開として追加)。
+
+設計上の要点:
+- **読み取り専用**。daily-batchが計算し正本を保有するselection_snapshot
+  (app_settingsテーブル)を読むだけで、新規スキャンは一切行わない
+  (CLAUDE.mdの「バッチが計算し正本を保有、ボタン押下は読み取り専用」の設計を
+  この新しい画面にも適用する)。IAMロールもGetItemのみ許可する
+- **JS非依存・全モード同一ページ**。短期/中期/長期のいずれかをJSで出し分ける
+  のではなく、3モード分のHTMLを1つのGETレスポンスに全部書き出す。AIクローラー・
+  検索botはJSを実行しないため、動的な出し分けだとインデックスされない。
+  ページ上部の「短期/中期/長期」リンクはページ内アンカー(#short等)で、
+  クリックしなくても3モード分の内容はすべてHTML上に存在する
+- **申込みフォームはこのLambdaでは処理しない**。フォームのaction属性を
+  register-stockの本番URLに向けて送信するだけで、実際の登録処理・
+  ダブルオプトイン等のロジックは一切複製しない(単一の正本を保つため)
+"""
+import html
+import os
+
+import boto3
+
+from config import SETTINGS_TABLE_DEFAULT, selection_snapshot_key
+from report import LANG_EN, LANG_JA, render_selection_cards, selection_subject
+
+SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
+REGISTER_URL = os.environ.get("REGISTER_URL", "")
+
+dynamodb = boto3.resource("dynamodb")
+
+SUPPORTED_LANGS = (LANG_JA, LANG_EN)
+_MODES = ("SHORT", "MID", "LONG")
+_ANCHOR = {"SHORT": "short", "MID": "mid", "LONG": "long"}
+
+
+def _detect_lang(event) -> str:
+    headers = event.get("headers") or {}
+    value = (headers.get("x-site-lang") or "").strip().lower()
+    if value in SUPPORTED_LANGS:
+        return value
+    params = event.get("queryStringParameters") or {}
+    value = (params.get("lang") or "").strip().lower()
+    return value if value in SUPPORTED_LANGS else LANG_JA
+
+
+def _get_selection_snapshot(mode: str) -> dict | None:
+    """daily-batchが保存した「本日の」選定スナップショットを読むだけ。
+    新規スキャンは行わない(handler.pyのget_selection_snapshotと同じ設計)。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": selection_snapshot_key(mode)})
+        item = resp.get("Item")
+        if not item or "ranked" not in item:
+            return None
+        return {"ranked": list(item["ranked"]), "signals_map": dict(item.get("signals_map") or {}),
+                "as_of_date": item.get("as_of_date")}
+    except Exception as e:
+        print(f"[WARN] 選定スナップショットの取得に失敗: {e}")
+        return None
+
+
+# サイトの既存ページ(register-stock側の_PAGE_STYLE)と揃えたトーンの最小限のCSS。
+# 個人開発・非公式ページであることが伝わるよう、装飾は最小限にする
+_PAGE_STYLE = """
+:root{--bg:#f4f6f9;--card:#ffffff;--ink:#161a22;--ink-muted:#5a6270;
+  --border:#e1e4ea;--accent:#16a34a;--accent-ink:#ffffff;}
+*{box-sizing:border-box;}
+body{background:var(--bg);color:var(--ink);margin:0;padding:28px 14px;line-height:1.6;
+  font-family:-apple-system,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic",system-ui,sans-serif;}
+.card{max-width:560px;margin:0 auto;background:var(--card);border:1px solid var(--border);
+  border-radius:12px;padding:24px 20px;box-shadow:0 1px 2px rgba(20,24,33,.05),0 8px 24px -12px rgba(20,24,33,.15);}
+h1{font-size:1.3em;margin:0 0 6px;}
+h2{font-size:1.1em;margin:26px 0 4px;padding-top:10px;border-top:1px solid var(--border);}
+h2:first-of-type{border-top:none;padding-top:0;}
+p{margin:0 0 12px;}
+a{color:var(--accent);text-decoration:none;}
+a:hover,a:focus-visible{text-decoration:underline;}
+input,button{border:1px solid var(--border);border-radius:8px;padding:9px 11px;
+  font-size:16px;font-family:inherit;background:var(--card);color:var(--ink);}
+button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px 16px;
+  font-weight:600;cursor:pointer;}
+.muted{color:var(--ink-muted);font-size:12.5px;}
+.eyebrow{font-size:12px;letter-spacing:.03em;color:var(--ink-muted);margin:0 0 2px;}
+.mode-nav{display:flex;gap:8px;margin:14px 0 20px;flex-wrap:wrap;}
+.mode-nav a{border:1px solid var(--border);border-radius:100px;padding:6px 14px;
+  font-size:13px;font-weight:600;color:var(--ink);}
+.notice-box{background:#eafbf0;border:1px solid #bbf0cf;border-radius:10px;
+  padding:14px 16px;margin:22px 0;}
+.btn-link{display:inline-block;background:var(--accent);color:var(--accent-ink)!important;
+  border-radius:8px;padding:10px 18px;font-weight:600;text-decoration:none!important;}
+.site-footer{max-width:560px;margin:16px auto 0;text-align:center;}
+"""
+
+
+def _intro_html(lang: str) -> str:
+    if lang == LANG_EN:
+        return """
+        <p class="eyebrow">PegSignal (free, indie-built) — preview, no sign-up required</p>
+        <h1>Today's undervalued NASDAQ100 growth stocks</h1>
+        <p>This page shows the same PEG-ranked screening results we email out, for all three
+        time horizons, without requiring an email address. Pick a horizon below or just
+        scroll through all three.</p>
+        """
+    return """
+    <p class="eyebrow">PegSignal（無料・個人開発）— プレビュー・登録不要</p>
+    <h1>今日の割安な成長株（NASDAQ100）</h1>
+    <p>メール配信しているものと同じPEGランキングの選定結果を、短期・中期・長期の
+    3モード分すべて、メールアドレス登録なしでこの場で確認できます。
+    下のリンクで見たいモードへ移動するか、そのまま3モード分をご覧ください。</p>
+    """
+
+
+def _mode_nav_html(lang: str) -> str:
+    labels_ja = {"SHORT": "短期", "MID": "中期", "LONG": "長期"}
+    labels_en = {"SHORT": "Short-term", "MID": "Mid-term", "LONG": "Long-term"}
+    labels = labels_en if lang == LANG_EN else labels_ja
+    links = "".join(f'<a href="#{_ANCHOR[m]}">{labels[m]}</a>' for m in _MODES)
+    return f'<div class="mode-nav">{links}</div>'
+
+
+def _mode_section_html(mode: str, lang: str, register_base_url: str) -> str:
+    snapshot = _get_selection_snapshot(mode)
+    heading = selection_subject(mode, lang).lstrip("📈 ")
+    anchor = _ANCHOR[mode]
+
+    if snapshot is None:
+        body = ("<p>No data yet for this mode." if lang == LANG_EN
+                else "<p>このモードのデータはまだありません。") + "</p>"
+        return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{body}'
+
+    body = render_selection_cards(
+        snapshot["ranked"], snapshot["signals_map"], register_base_url, lang, register_token=None,
+    )
+    as_of = snapshot.get("as_of_date")
+    as_of_note = ""
+    if as_of:
+        text = f"Data as of {as_of}" if lang == LANG_EN else f"{as_of}時点のデータです"
+        as_of_note = f'<p class="muted">{text}</p>'
+    return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{as_of_note}{body}'
+
+
+def _signup_pitch_html(lang: str, register_url: str) -> str:
+    """個別銘柄の監視・メール配信は登録が必要である旨を説明し、既存の申込みページへ
+    誘導する。実際の登録フォーム(メール入力+bot対策の確認)はregister-stock(本番)
+    が持つ唯一の実装であり、ここでは複製しない(ここに簡易フォームを置いて
+    action属性だけ向けると、確認なしの送信になり本番側でエラーになるため、
+    単純なリンクで正規の申込みページへ誘導する)。"""
+    url = html.escape(register_url)
+    if lang == LANG_EN:
+        return f"""
+        <div class="notice-box">
+        <p><strong>Want to track specific stocks, or get this by email?</strong></p>
+        <p>This page always shows today's top picks only. Sign up (free) to additionally:
+        pick individual stocks to watch, get daily/weekly/monthly trend &amp; momentum
+        alerts on them, and receive this selection report by email on your chosen
+        schedule.</p>
+        <p><a class="btn-link" href="{url}?lang=en">Sign up (free) →</a></p>
+        <p class="muted">Your email is used only to deliver reports and your access link,
+        and is never shared with third parties.
+        <a href="{url}?guide=1&amp;lang=en">See how it works, with pictures →</a></p>
+        </div>
+        """
+    return f"""
+    <div class="notice-box">
+    <p><strong>個別銘柄を監視したい方・メールで受け取りたい方へ</strong></p>
+    <p>このページは常に「本日の上位銘柄」だけを表示します。登録（無料）すると、
+    追加で以下が使えるようになります: 気になる銘柄を選んで監視・トレンド/モメンタム
+    の変化を通知・この選定レポートを選んだ頻度でメール受信。</p>
+    <p><a class="btn-link" href="{url}">申し込む（無料） →</a></p>
+    <p class="muted">登録いただくメールアドレスはレポート配信・ログイン用リンクの
+    送信にのみ使用し、第三者への提供は行いません。
+    <a href="{url}?guide=1">図でわかる使い方ガイドを見る →</a></p>
+    </div>
+    """
+
+
+def _page(inner_html: str, lang: str, status: int = 200) -> dict:
+    title = ("PegSignal preview — today's NASDAQ100 growth-stock picks, no sign-up"
+             if lang == LANG_EN else "PegSignalプレビュー — 登録不要で見る今日の成長株選定")
+    footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
+    body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta charset="utf-8">
+    <title>{title}</title>
+    <style>{_PAGE_STYLE}</style></head>
+    <body>
+    <div class="card">
+    {inner_html}
+    </div>
+    <p class="site-footer muted">{footer}</p>
+    </body></html>"""
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "text/html; charset=utf-8"},
+        "body": body,
+    }
+
+
+def handler(event, context):
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
+    headers = event.get("headers") or {}
+    user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
+    print(f"[ACCESS] preview path={path!r} ua={user_agent!r}")
+
+    lang = _detect_lang(event)
+    sections = "".join(_mode_section_html(m, lang, REGISTER_URL) for m in _MODES)
+    inner = _intro_html(lang) + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL)
+    return _page(inner, lang)
