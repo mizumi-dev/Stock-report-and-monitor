@@ -123,11 +123,11 @@ _SITE_TITLE = {
 _SITE_DESCRIPTION = {
     LANG_JA: (
         "PEGレシオで割安な成長株をNASDAQ100構成銘柄から選定し、"
-        "トレンド・モメンタム・出来高のシグナルを毎日メールで通知する無料サービスです。"
+        "トレンド・モメンタム・出来高のシグナルを定期メールで通知する無料サービスです。"
     ),
     LANG_EN: (
         "A free service that screens NASDAQ100 constituents for undervalued growth stocks "
-        "by PEG ratio and emails you trend, momentum, and volume signals daily."
+        "by PEG ratio and emails you trend, momentum, and volume signals on a regular schedule."
     ),
 }
 # ホーム画面に追加した際のアイコン名(iOS)・PWAアプリ名。短く収まる必要がある
@@ -195,18 +195,33 @@ details p:last-child{margin-bottom:0;}
   font-size:12px;font-weight:600;white-space:nowrap;}
 .pill.buy{background:#dcfce7;color:#166534;}
 .pill.neutral{background:var(--border);color:var(--ink-muted);}
+/* 使い方ガイド(?guide=1)用。図を主役にするため余白を広めに取る */
+.fig{margin:14px 0 6px;}
+.fig svg{display:block;width:100%;height:auto;}
+.fig-cap{font-size:12px;color:var(--ink-muted);margin:0 0 18px;text-align:center;}
+.guide-card{border:1px solid var(--border);border-radius:10px;padding:14px;margin:10px 0;}
+.guide-card h4{margin:0 0 6px;}
+.guide-card p{margin:0 0 6px;font-size:13.5px;}
+.guide-card .tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;
+  border-radius:100px;background:#dcfce7;color:#166534;margin-bottom:6px;}
+.guide-card .tag.blue{background:#e0edff;color:#1e40af;}
+.faq{margin:8px 0;}
+.faq summary{font-size:13.5px;}
+.faq p{font-size:13.5px;}
 """
 
 
 def _page(inner_html: str, status=200, lang: str = LANG_JA):
     if lang == LANG_EN:
         footer = (
-            '<a href="?about=1">About</a> ・ <a href="?contact=1">Contact</a> ・ '
+            '<a href="?guide=1">How to use</a> ・ <a href="?about=1">About</a> ・ '
+            '<a href="?contact=1">Contact</a> ・ '
             '<a href="?privacy=1">Privacy Policy</a> ・ <a href="?terms=1">Terms</a>'
         )
     else:
         footer = (
-            '<a href="?about=1">運営者情報</a> ・ <a href="?contact=1">お問い合わせ</a> ・ '
+            '<a href="?guide=1">使い方</a> ・ <a href="?about=1">運営者情報</a> ・ '
+            '<a href="?contact=1">お問い合わせ</a> ・ '
             '<a href="?privacy=1">プライバシーポリシー</a> ・ <a href="?terms=1">利用規約</a>'
         )
     return _response(
@@ -277,6 +292,16 @@ def _find_token_by_email(email: str) -> dict | None:
     return None
 
 
+def _email_guide_link(lang: str = LANG_JA) -> str:
+    """すべての送信メールから使い方ガイドへ辿れるようにする。トークン不要で読める。
+    レポートメール側(report.py)にも同等のリンクがある。"""
+    lang_param = "&amp;lang=en" if lang == LANG_EN else ""
+    label = ("📖 New here? Read the illustrated how-to guide →" if lang == LANG_EN
+             else "📖 はじめての方へ — 使い方ガイド（図でわかる説明） →")
+    return (f'<p style="margin:12px 0 0;font-size:13px;">'
+            f'<a href="{html.escape(REGISTER_FUNCTION_URL)}?guide=1{lang_param}">{label}</a></p>')
+
+
 def _send_confirmation_email(email: str, token: str, lang: str = LANG_JA):
     link = f"{REGISTER_FUNCTION_URL}?token={token}&confirm=1"
     if lang == LANG_EN:
@@ -285,6 +310,7 @@ def _send_confirmation_email(email: str, token: str, lang: str = LANG_JA):
         <p>Thanks for signing up. Click the link below to complete your registration.</p>
         <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
         <p>If you didn't request this, please disregard this email.</p>
+        {_email_guide_link(lang)}
         """
     else:
         subject = "【登録確認】株式レポートサービスのお申込み"
@@ -292,6 +318,7 @@ def _send_confirmation_email(email: str, token: str, lang: str = LANG_JA):
         <p>お申込みありがとうございます。以下のリンクをクリックすると登録が完了します。</p>
         <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
         <p>心当たりがない場合はこのメールを破棄してください。</p>
+        {_email_guide_link(lang)}
         """
     ses.send_email(
         Source=SES_SENDER,
@@ -394,7 +421,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         return f"""
         {notice_html}
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>Track undervalued NASDAQ100 growth stocks, every morning</h1>
+        <h1>Track undervalued NASDAQ100 growth stocks, delivered on a schedule</h1>
         <p class="trust-line">🔒 Your email is used only for report delivery, no spam.
         <a href="?about=1">Delete your data anytime, one click.</a></p>
 
@@ -414,14 +441,19 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         <div class="steps">
           <div class="step"><div class="step-num">1</div><div class="step-label">Sign up</div></div>
           <div class="step"><div class="step-num">2</div><div class="step-label">Pick stocks</div></div>
-          <div class="step"><div class="step-num">3</div><div class="step-label">Daily reports</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-label">Scheduled reports</div></div>
         </div>
+
+        <p><a href="?guide=1">📖 New here? See how it works, with pictures</a></p>
 
         <details>
           <summary>How stocks are picked, and important notes</summary>
           <p>We screen NASDAQ100 constituents for undervalued growth stocks by
           <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
-          we monitor trend, momentum, and volume signals daily.</p>
+          we monitor trend, momentum, and volume signals on a regular schedule.</p>
+          <p class="muted">How often you hear from us depends on the time horizon you pick
+          (short-term = every trading day, mid-term = weekly, long-term = monthly). You can
+          change it at any time.</p>
           <p class="muted">Not investment advice. Data comes from Yahoo Finance; we don't
           guarantee its accuracy or timeliness. See <a href="?info=1">how it works</a>
           for details.</p>
@@ -451,7 +483,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     return f"""
     {notice_html}
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>NASDAQ100の割安な成長株を、毎朝メールでチェック</h1>
+    <h1>NASDAQ100の割安な成長株を、定期メールでチェック</h1>
     <p class="trust-line">🔒 メールはレポート配信にのみ使用・スパムなし・
     <a href="?about=1">いつでも1クリックで完全削除</a>できます。</p>
 
@@ -471,14 +503,18 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     <div class="steps">
       <div class="step"><div class="step-num">1</div><div class="step-label">メール登録</div></div>
       <div class="step"><div class="step-num">2</div><div class="step-label">銘柄を選ぶ</div></div>
-      <div class="step"><div class="step-num">3</div><div class="step-label">毎日レポート受信</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-label">定期レポート受信</div></div>
     </div>
+
+    <p><a href="?guide=1">📖 はじめての方へ — 使い方をイラストで見る</a></p>
 
     <details>
       <summary>くわしい選定方法・注意事項</summary>
       <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
       低く割安な成長株を選定します。登録した銘柄については、トレンド・モメンタム・
-      出来高の3種類のシグナルを毎日監視して通知します。</p>
+      出来高の3種類のシグナルを定期的に監視して通知します。</p>
+      <p class="muted">※配信の頻度は選んだ判定期間モードによって変わります
+      （短期＝毎営業日、中期＝週1回、長期＝月1回）。あとからいつでも変更できます。</p>
       <p class="muted">※投資助言ではありません。判定はYahoo Financeが提供するデータに
       基づいており、正確性・遅延について当サービスは保証しません。詳しくは
       <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
@@ -743,6 +779,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           You'll return to this screen right away. The email arrives within a minute or so.</p>
 
         <hr style="margin:24px 0;">
+        <p><a href="?token={t}&guide=1">📖 How to use PegSignal (illustrated guide)</a></p>
         <p><a href="?token={t}&info=1">How it works</a></p>
         <p class="muted"><a href="?token={t}&delete_account=1">Delete account (erase all your data)</a></p>
         {lang_switch}
@@ -795,6 +832,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
       送信を受け付けたらすぐこの画面に戻ります。メール到着まで1分ほどかかります。</p>
 
     <hr style="margin:24px 0;">
+    <p><a href="?token={t}&guide=1">📖 使い方ガイド（図でわかる説明）</a></p>
     <p><a href="?token={t}&info=1">この仕組みについて（判定ロジック・データ元）</a></p>
     <p class="muted"><a href="?token={t}&delete_account=1">退会（登録データを削除）</a></p>
     <p class="muted"><a href="?token={t}&lang=en">View in English</a></p>
@@ -1005,6 +1043,297 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     """
 
 
+# ===== 使い方ガイド(?guide=1)の図 =====
+# 外部の画像ファイル・CDNを持たずLambda単体で完結させる方針(アイコンのdata URIと同じ)
+# のため、図はすべてインラインSVGで描く。文字は言語ごとに差し替えられるよう引数で受ける。
+# SVGは自動改行しないので、渡すラベルは短く保つこと(長い説明は図の下のキャプションへ)。
+
+def _svg_flow(s1: str, s2: str, s3: str) -> str:
+    """申込み→銘柄選択→レポート受信、の3ステップ"""
+    def box(x: int, num: int, label: str) -> str:
+        return (
+            f'<rect x="{x}" y="16" width="92" height="56" rx="10" fill="#ffffff" stroke="#e1e4ea"/>'
+            f'<circle cx="{x + 46}" cy="34" r="10" fill="#16a34a"/>'
+            f'<text x="{x + 46}" y="38" text-anchor="middle" font-size="11.5" font-weight="700"'
+            f' fill="#ffffff">{num}</text>'
+            f'<text x="{x + 46}" y="60" text-anchor="middle" font-size="10.5" fill="#161a22">{label}</text>'
+        )
+
+    def arrow(x: int) -> str:
+        return (f'<path d="M{x} 44 L{x + 14} 44" stroke="#5a6270" stroke-width="1.6"/>'
+                f'<path d="M{x + 13} 40 L{x + 19} 44 L{x + 13} 48 Z" fill="#5a6270"/>')
+
+    return (
+        '<div class="fig"><svg viewBox="0 0 330 88" role="img">'
+        + box(0, 1, s1) + arrow(94)
+        + box(119, 2, s2) + arrow(213)
+        + box(238, 3, s3)
+        + "</svg></div>"
+    )
+
+
+def _svg_peg(per: str, growth: str, peg: str, low: str, high: str) -> str:
+    """PEG = PER ÷ 利益成長率。小さいほど「成長のわりに株価が安い」"""
+    def chip(x: int, w: int, label: str, fill: str, ink: str) -> str:
+        return (
+            f'<rect x="{x}" y="10" width="{w}" height="34" rx="8" fill="{fill}" stroke="#e1e4ea"/>'
+            f'<text x="{x + w // 2}" y="32" text-anchor="middle" font-size="11" fill="{ink}">{label}</text>'
+        )
+
+    return (
+        '<div class="fig"><svg viewBox="0 0 330 118" role="img">'
+        + chip(0, 104, per, "#ffffff", "#161a22")
+        + '<text x="112" y="33" text-anchor="middle" font-size="16" fill="#5a6270">÷</text>'
+        + chip(122, 104, growth, "#ffffff", "#161a22")
+        + '<text x="234" y="33" text-anchor="middle" font-size="16" fill="#5a6270">=</text>'
+        + chip(244, 86, peg, "#dcfce7", "#166534")
+        # 下段: PEGの大小が何を意味するかを1本の軸で示す
+        + '<line x1="10" y1="82" x2="320" y2="82" stroke="#e1e4ea" stroke-width="2"/>'
+        + '<circle cx="70" cy="82" r="6" fill="#16a34a"/>'
+        + '<circle cx="260" cy="82" r="6" fill="#b91c1c"/>'
+        + f'<text x="70" y="104" text-anchor="middle" font-size="10.5" fill="#166534">{low}</text>'
+        + f'<text x="260" y="104" text-anchor="middle" font-size="10.5" fill="#b91c1c">{high}</text>'
+        + "</svg></div>"
+    )
+
+
+def _svg_signals(trend: str, momentum: str, volume: str,
+                 on_label: str, off_label: str, sell_label: str) -> str:
+    """3種類のシグナルと、ランプの色の意味"""
+    rows = [(trend, 26), (momentum, 54), (volume, 82)]
+    body = "".join(
+        f'<text x="0" y="{y + 4}" font-size="11.5" fill="#161a22">{name}</text>'
+        f'<circle cx="150" cy="{y}" r="7" fill="#16a34a"/>'
+        f'<circle cx="200" cy="{y}" r="7" fill="#e1e4ea"/>'
+        f'<circle cx="250" cy="{y}" r="7" fill="#b91c1c"/>'
+        for name, y in rows
+    )
+    # 出来高は買い/売りの方向を持たない参考指標なので、売りランプは描かない
+    body = body.replace('<circle cx="250" cy="82" r="7" fill="#b91c1c"/>',
+                        '<text x="250" y="86" text-anchor="middle" font-size="11" fill="#5a6270">—</text>')
+    head = (
+        f'<text x="150" y="8" text-anchor="middle" font-size="10" fill="#166534">{on_label}</text>'
+        f'<text x="200" y="8" text-anchor="middle" font-size="10" fill="#5a6270">{off_label}</text>'
+        f'<text x="250" y="8" text-anchor="middle" font-size="10" fill="#b91c1c">{sell_label}</text>'
+    )
+    return f'<div class="fig"><svg viewBox="0 0 290 96" role="img">{head}{body}</svg></div>'
+
+
+def _svg_frequency(short: str, mid: str, long: str, axis: str) -> str:
+    """判定期間モードごとの配信頻度。1か月ぶんの営業日(20日)を点で表す"""
+    days, x0, step = 20, 74, 12
+    rows = [
+        (short, 20, set(range(days))),
+        (mid, 50, {0, 5, 10, 15}),
+        (long, 80, {0}),
+    ]
+    body = ""
+    for label, y, active in rows:
+        body += f'<text x="0" y="{y + 4}" font-size="11" fill="#161a22">{label}</text>'
+        body += f'<line x1="{x0}" y1="{y}" x2="{x0 + (days - 1) * step}" y2="{y}" stroke="#eef0f4" stroke-width="2"/>'
+        for i in range(days):
+            on = i in active
+            body += (f'<circle cx="{x0 + i * step}" cy="{y}" r="{4.5 if on else 2.5}" '
+                     f'fill="{"#16a34a" if on else "#e1e4ea"}"/>')
+    body += f'<text x="{x0}" y="104" font-size="10" fill="#5a6270">{axis}</text>'
+    return f'<div class="fig"><svg viewBox="0 0 320 112" role="img">{body}</svg></div>'
+
+
+def _render_guide(token: str, lang: str = LANG_JA) -> str:
+    """初めての人向けの使い方ガイド。専門用語を避け、図を主役にして説明する。
+    トークンの有無に関わらず読めるようにしておく(申込み前の判断材料になるため)。"""
+    t_ = html.escape(token)
+    back = f'<p><a href="?token={t_}">戻る</a></p>' if token else '<p><a href="?">トップに戻る</a></p>'
+    back_en = f'<p><a href="?token={t_}">Back</a></p>' if token else '<p><a href="?">Back to top</a></p>'
+
+    if lang == LANG_EN:
+        return f"""
+        <h3>📖 How to use PegSignal</h3>
+        <p class="muted">A plain-language walkthrough for first-time users. No finance
+        background needed.</p>
+
+        <h4>1. What this service does</h4>
+        {_svg_flow("Sign up", "Pick stocks", "Get reports")}
+        <p class="fig-cap">Sign up with your email, choose the stocks you care about,
+        and reports arrive automatically.</p>
+        <p>PegSignal looks at the 100 largest non-financial companies on the NASDAQ
+        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on), finds the ones that look
+        <strong>cheap relative to how fast they're growing</strong>, and emails you the list.
+        It also watches the specific stocks you pick and tells you when something changes.</p>
+
+        <h4>2. The two emails you'll receive</h4>
+        <div class="guide-card">
+          <span class="tag">📈 Selection report</span>
+          <h4>"Here are cheap-looking growth stocks right now"</h4>
+          <p>A ranked list picked automatically from all NASDAQ100 stocks. You don't have to
+          set anything up — this arrives on its own.</p>
+        </div>
+        <div class="guide-card">
+          <span class="tag blue">📊 Monitoring report</span>
+          <h4>"Here's what's happening to the stocks you chose"</h4>
+          <p>Only covers stocks you added to your watchlist. If your watchlist is empty,
+          this email isn't sent.</p>
+        </div>
+
+        <h4>3. What "PEG ratio" means</h4>
+        {_svg_peg("P/E ratio", "Growth rate", "PEG", "Cheap", "Expensive")}
+        <p class="fig-cap">PEG = price valuation ÷ growth rate. Lower is cheaper.</p>
+        <p>A stock can have a high price tag and still be reasonable <em>if</em> the company is
+        growing fast. PEG captures exactly that: it divides how expensive the stock looks by how
+        fast profits are growing. <strong>A lower PEG means you're paying less for each unit of
+        growth.</strong> We only include stocks with a PEG of {MAX_PEG} or below and earnings
+        growth of {MIN_GROWTH * 100:.0f}% or more.</p>
+
+        <h4>4. Reading the signal lamps</h4>
+        {_svg_signals("Trend", "Momentum", "Volume", "Buy", "None", "Sell")}
+        <p class="fig-cap">Three independent checks. Volume has no buy/sell direction.</p>
+        <p><strong>Trend</strong> — is the price generally heading up or down?<br>
+        <strong>Momentum</strong> — has it been bought or sold too hard recently?<br>
+        <strong>Volume</strong> — are unusually many people trading it right now?</p>
+        <p class="muted">Important: these three are shown separately on purpose. They are
+        <strong>not</strong> combined into a single score, and a green lamp is not a
+        recommendation to buy. Think of them as three different instruments on a dashboard.</p>
+
+        <h4>5. Choosing your time horizon</h4>
+        {_svg_frequency("Short", "Mid", "Long", "→ one month")}
+        <p class="fig-cap">Your choice changes both how sensitive the signals are and how
+        often selection reports arrive.</p>
+        <p><strong>Short-term</strong> reacts quickly and emails you every trading day, but
+        produces more false alarms. <strong>Mid-term</strong> (the default) is a balanced weekly
+        rhythm. <strong>Long-term</strong> only fires a few times a year — going quiet for a
+        while is normal and expected.</p>
+        <p class="muted">You can change this at any time from the main screen, and it takes
+        effect from the next report.</p>
+
+        <h4>6. A typical week</h4>
+        <div class="guide-card">
+          <p><strong>①</strong> A selection report arrives. Something catches your eye.</p>
+          <p><strong>②</strong> Tap "Add to watchlist" right inside the email.</p>
+          <p><strong>③</strong> From then on, that stock shows up in your monitoring reports.</p>
+          <p><strong>④</strong> Use the broker links or the "Ask an AI" prompt to dig deeper
+          before deciding anything yourself.</p>
+        </div>
+
+        <details class="faq">
+          <summary>Is this investment advice?</summary>
+          <p>No. Every number here is produced by fixed formulas applied to public data, with no
+          human judgment about whether you personally should buy anything. All decisions and
+          their consequences are yours. See the <a href="?terms=1">Terms</a>.</p>
+        </details>
+        <details class="faq">
+          <summary>Does it cost anything?</summary>
+          <p>No. It's completely free, and there is no paid tier. We never ask for card details.</p>
+        </details>
+        <details class="faq">
+          <summary>How do I stop the emails?</summary>
+          <p>Every email has an unsubscribe link at the bottom, and the main screen has
+          "Delete account". Deletion is immediate and removes everything.</p>
+        </details>
+        <details class="faq">
+          <summary>Where do the numbers come from?</summary>
+          <p>Yahoo Finance. We pass their values through unchanged rather than recalculating
+          them, so their accuracy and timing limits apply here too.</p>
+        </details>
+
+        <p><a href="?info=1">→ For the exact formulas and thresholds, see "How it works"</a></p>
+        {back_en}
+        """
+
+    return f"""
+    <h3>📖 PegSignalの使い方</h3>
+    <p class="muted">はじめての方向けに、専門用語をできるだけ使わずに説明します。
+    投資の知識は不要です。</p>
+
+    <h4>1. このサービスは何をするの？</h4>
+    {_svg_flow("メール登録", "銘柄を選ぶ", "レポート受信")}
+    <p class="fig-cap">メールアドレスを登録し、気になる銘柄を選ぶだけ。
+    あとは自動でレポートが届きます。</p>
+    <p>PegSignalは、米国NASDAQ市場の代表的な100社（「NASDAQ100」。Apple・Microsoft・
+    NVIDIAなど）の中から、<strong>成長のわりに株価が安く見える銘柄</strong>を自動で
+    探してメールでお知らせします。さらに、あなたが選んだ銘柄については値動きを
+    見張って、変化があればお知らせします。</p>
+
+    <h4>2. 届くメールは2種類</h4>
+    <div class="guide-card">
+      <span class="tag">📈 選定レポート</span>
+      <h4>「今、割安に見える成長株はこれです」</h4>
+      <p>NASDAQ100の全銘柄から自動で選んだランキングです。何も設定しなくても
+      勝手に届きます。</p>
+    </div>
+    <div class="guide-card">
+      <span class="tag blue">📊 監視レポート</span>
+      <h4>「あなたが選んだ銘柄は今こうなっています」</h4>
+      <p>監視リストに登録した銘柄だけが対象です。1件も登録していない場合、
+      このメールは届きません。</p>
+    </div>
+
+    <h4>3. 「PEGレシオ」ってなに？</h4>
+    {_svg_peg("PER(割高さ)", "利益成長率", "PEG", "割安", "割高")}
+    <p class="fig-cap">PEG＝株価の割高さ ÷ 成長の速さ。小さいほど割安。</p>
+    <p>株価が高くても、その会社が急成長しているなら「妥当」かもしれません。PEGは
+    まさにそれを測る指標で、<strong>株価の割高さを、利益の成長の速さで割った値</strong>
+    です。<strong>PEGが小さいほど、成長のわりに安く買える</strong>ことを意味します。
+    本サービスでは、PEGが{MAX_PEG}以下かつ利益成長率が{MIN_GROWTH * 100:.0f}%以上の
+    銘柄だけを対象にしています。</p>
+
+    <h4>4. シグナルのランプの見方</h4>
+    {_svg_signals("トレンド", "モメンタム", "出来高", "買い", "なし", "売り")}
+    <p class="fig-cap">3つは別々の観点。出来高には買い/売りの方向がありません。</p>
+    <p><strong>トレンド</strong> — 株価がおおむね上向きか、下向きか<br>
+    <strong>モメンタム</strong> — 最近、買われすぎ・売られすぎになっていないか<br>
+    <strong>出来高</strong> — いつもより多くの人が売買しているか</p>
+    <p class="muted">大切な点として、この3つは<strong>あえて別々に</strong>表示しています。
+    合成して1つのスコアにはしておらず、緑のランプが「買い推奨」を意味するものでも
+    ありません。車のダッシュボードにある3つの別々の計器のようなものだとお考えください。</p>
+
+    <h4>5. 判定期間モードの選び方</h4>
+    {_svg_frequency("短期", "中期", "長期", "→ 1か月")}
+    <p class="fig-cap">選んだモードで、シグナルの敏感さと選定レポートの
+    届く頻度が変わります。</p>
+    <p><strong>短期</strong>は反応が早く毎営業日届きますが、そのぶん「騙し」も
+    増えます。<strong>中期</strong>（初期設定）は週1回のバランス型です。
+    <strong>長期</strong>は年に数回しか点灯しません。しばらく何も出ないのは
+    長期モードでは正常な状態です。</p>
+    <p class="muted">メイン画面からいつでも変更でき、次回のレポートから反映されます。</p>
+
+    <h4>6. 使い方の流れ（例）</h4>
+    <div class="guide-card">
+      <p><strong>①</strong> 選定レポートが届く。気になる銘柄を見つける。</p>
+      <p><strong>②</strong> メール内の「この銘柄を監視リストに登録」を押す。</p>
+      <p><strong>③</strong> 以降、その銘柄が監視レポートに載るようになる。</p>
+      <p><strong>④</strong> 証券会社リンクや「AIに分析してもらう」で詳しく調べ、
+      最終的にはご自身で判断する。</p>
+    </div>
+
+    <details class="faq">
+      <summary>これは投資助言ですか？</summary>
+      <p>いいえ。表示している数値はすべて、公開データに決まった計算式を当てはめた
+      結果です。「あなたが買うべきかどうか」という人間の判断は一切含みません。
+      投資判断とその結果はご自身の責任となります。詳しくは
+      <a href="?terms=1">利用規約</a>をご覧ください。</p>
+    </details>
+    <details class="faq">
+      <summary>お金はかかりますか？</summary>
+      <p>かかりません。完全無料で、有料プランもありません。クレジットカード情報を
+      お聞きすることは一切ありません。</p>
+    </details>
+    <details class="faq">
+      <summary>メールを止めたいときは？</summary>
+      <p>すべてのメールの末尾に配信停止リンクがあります。メイン画面の「退会」からも
+      できます。削除は即時で、登録データはすべて消えます。</p>
+    </details>
+    <details class="faq">
+      <summary>数値はどこから来ていますか？</summary>
+      <p>Yahoo Financeです。当サービスで再計算はせず、提供された値をそのまま
+      使っています。そのため正確性・遅延についてもYahoo Finance側の制約を
+      受けます。</p>
+    </details>
+
+    <p><a href="?info=1">→ 具体的な計算式・しきい値は「この仕組みについて」をご覧ください</a></p>
+    {back}
+    """
+
+
 def _render_signups_paused(lang: str = LANG_JA) -> str:
     """新規登録を一時停止している間に表示する案内。既存トークンでのアクセスは
     このページを経由しない(handler()側でSIGNUPS_ENABLEDを見るのはトークン無し/
@@ -1073,6 +1402,7 @@ def _send_confirmation_email_reminder(email: str, token: str, lang: str = LANG_J
         body = f"""
         <p>This email address is already registered. Bookmark the link below to use the service.</p>
         <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+        {_email_guide_link(lang)}
         """
         ses.send_email(
             Source=SES_SENDER,
@@ -1086,6 +1416,7 @@ def _send_confirmation_email_reminder(email: str, token: str, lang: str = LANG_J
     body = f"""
     <p>このメールアドレスは既に登録済みです。以下のリンクをブックマークしてご利用ください。</p>
     <p><a href="{html.escape(link)}">{html.escape(link)}</a></p>
+    {_email_guide_link(lang)}
     """
     ses.send_email(
         Source=SES_SENDER,
@@ -1250,6 +1581,8 @@ def _classify_route(params: dict) -> str:
         return "contact"
     if params.get("info"):
         return "info"
+    if params.get("guide"):
+        return "guide"
     if params.get("ai_prompt"):
         return "ai_prompt"
     if params.get("lang") in SUPPORTED_LANGS:
@@ -1322,6 +1655,13 @@ def handler(event, context):
         # トークン未所持でも仕組みの説明は読めるようにする(SEO・信頼性向上のため公開)。
         # _render_info()は不正なtokenでも例外を出さず既定モードにフォールバックする
         return _page(_render_info(token, lang), lang=lang)
+
+    if params.get("guide"):
+        # 使い方ガイド。申込み前の判断材料になるためトークン不要で公開する。
+        # メール内リンクからも来るため、?lang=での明示指定を受け付ける
+        # (レポートを発行した言語がX-Site-Langヘッダーだけでは伝わらないため)
+        guide_lang = params.get("lang") if params.get("lang") in SUPPORTED_LANGS else lang
+        return _page(_render_guide(token, guide_lang), lang=guide_lang)
 
     if params.get("ai_prompt"):
         # レポートメールの「AIに分析してもらう」リンクから来る。トークン不要で

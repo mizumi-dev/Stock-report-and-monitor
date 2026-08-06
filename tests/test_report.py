@@ -26,6 +26,28 @@ def test_selection_report_footer_link_has_no_query_ampersand():
     assert 'href="https://pegsignal.com/?token=tok123"' in body
 
 
+def test_selection_report_links_to_usage_guide():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert 'href="https://pegsignal.com/?guide=1"' in body
+
+
+def test_monitoring_report_links_to_usage_guide():
+    results = [{"ticker": "NVDA", "price": 100.0, "prev_close": 98.0,
+                "signals": {"buy_trend": True, "volume_ratio": 1.1}, "peg": 1.2}]
+    body = build_monitoring_report(results, "MID", None, "https://pegsignal.com/", "tok123")
+    assert 'href="https://pegsignal.com/?guide=1"' in body
+
+
+def test_report_guide_link_carries_language_for_english_users():
+    """メール内リンクにはX-Site-Langが付かないため、?lang=enで言語を引き継ぐ"""
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+    assert 'href="https://pegsignal.com/?guide=1&amp;lang=en"' in body
+
+
 def test_selection_report_strongest_signals_counts_buy_only_not_sell():
     """sell_trend/sell_momentumは「シグナルが最も強い」の対象外(バグ修正)。
     デッドクロス+買われすぎ(2件の売りシグナル)を持つ銘柄が、買いシグナル1件の

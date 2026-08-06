@@ -56,6 +56,12 @@ def _event(_headers=None, **params):
     return event
 
 
+def _visible(body: str) -> str:
+    """利用者の目に触れる部分だけを取り出す。<style>内はCSSと日本語コメントを
+    含むが画面には出ないため、言語混在チェックの対象から除く。"""
+    return re.sub(r"<style>.*?</style>", "", body, flags=re.S)
+
+
 class TestAuth:
     def test_missing_token_shows_signup_form(self, rh):
         r = rh.handler(_event(), None)
@@ -358,6 +364,17 @@ class TestLanguageConsistency:
         r_ja = rh.handler(_event(token="bogus", confirm="1"), None)
         assert "無効なリンクです" in r_ja["body"]
 
+    def test_no_japanese_anywhere_on_english_pages(self, rh):
+        """英語利用者に日本語が1文字も見えないことを、公開ページ全体で保証する。
+        メイン画面(?token=)だけは「日本語で表示」という言語切替リンクを意図的に
+        日本語で出すため、この網羅チェックからは除外している。"""
+        pages = [{}, {"guide": "1"}, {"info": "1"}, {"about": "1"},
+                 {"privacy": "1"}, {"terms": "1"}, {"contact": "1"}]
+        for params in pages:
+            body = _visible(rh.handler(_event(_headers={"x-site-lang": "en"}, **params), None)["body"])
+            found = re.findall(r"[ぁ-んァ-ン一-龥]+", body)
+            assert not found, f"英語ページ {params or 'トップ'} に日本語が残っている: {found}"
+
     def test_report_send_failure_page_is_fully_english(self, rh):
         rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
         rh.lambda_client.invoke.side_effect = RuntimeError("boom")
@@ -365,6 +382,86 @@ class TestLanguageConsistency:
         assert r["statusCode"] == 500
         assert "戻る" not in r["body"]
         assert "運営者情報" not in r["body"]
+
+
+class TestUsageGuide:
+    """初めての人向けの使い方ガイド(?guide=1)。申込み前の判断材料になるため
+    トークン無しでも読める必要がある。"""
+
+    def test_guide_is_public_without_token(self, rh):
+        r = rh.handler(_event(guide="1"), None)
+        assert r["statusCode"] == 200
+        assert "PegSignalの使い方" in r["body"]
+
+    def test_guide_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, guide="1"), None)
+        assert "How to use PegSignal" in r["body"]
+        assert not re.search(r"[ぁ-んァ-ン一-龥]", _visible(r["body"]))
+
+    def test_guide_honors_explicit_lang_param_from_email_link(self, rh):
+        """メール内リンクにはX-Site-Langが付かないため、?lang=で言語を引き継ぐ"""
+        r = rh.handler(_event(guide="1", lang="en"), None)
+        assert "How to use PegSignal" in r["body"]
+
+    def test_guide_contains_diagrams(self, rh):
+        r = rh.handler(_event(guide="1"), None)
+        assert r["body"].count("<svg") >= 4
+
+    def test_guide_diagrams_are_wellformed_svg(self, rh):
+        import xml.etree.ElementTree as ET
+        r = rh.handler(_event(guide="1"), None)
+        for svg in re.findall(r"<svg.*?</svg>", r["body"], re.S):
+            ET.fromstring(svg)
+
+    def test_guide_is_linked_from_signup_form(self, rh):
+        assert "?guide=1" in rh.handler(_event(), None)["body"]
+
+    def test_guide_is_linked_from_main_form(self, rh):
+        assert "guide=1" in rh.handler(_event(token=VALID_TOKEN), None)["body"]
+
+    def test_guide_is_linked_from_every_page_footer(self, rh):
+        for params in ({"privacy": "1"}, {"terms": "1"}, {"about": "1"}, {"contact": "1"}):
+            assert "?guide=1" in rh.handler(_event(**params), None)["body"]
+
+    def test_confirmation_email_links_to_guide(self, rh):
+        rh.handler(_event(signup_email="new@example.com", captcha_n1="1",
+                          captcha_n2="2", captcha_answer="3"), None)
+        body = rh.ses.send_email.call_args.kwargs["Message"]["Body"]["Html"]["Data"]
+        assert "?guide=1" in body
+
+    def test_confirmation_email_guide_link_is_english_for_en_users(self, rh):
+        rh.handler(_event(_headers={"x-site-lang": "en"}, signup_email="new@example.com",
+                          captcha_n1="1", captcha_n2="2", captcha_answer="3"), None)
+        body = rh.ses.send_email.call_args.kwargs["Message"]["Body"]["Html"]["Data"]
+        assert "?guide=1&amp;lang=en" in body
+
+    def test_reminder_email_links_to_guide(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(Item={
+            "token": "tok-existing", "email": "existing@example.com", "status": "approved"})
+        rh.handler(_event(signup_email="existing@example.com", captcha_n1="1",
+                          captcha_n2="2", captcha_answer="3"), None)
+        body = rh.ses.send_email.call_args.kwargs["Message"]["Body"]["Html"]["Data"]
+        assert "?guide=1" in body
+
+
+class TestDeliveryFrequencyWording:
+    """配信頻度は判定期間モードで変わる(短期=毎営業日・中期=週1・長期=月1)ため、
+    申込みページで「毎日届く」と断定してはいけない。"""
+
+    def test_signup_page_does_not_promise_daily_delivery(self, rh):
+        body = rh.handler(_event(), None)["body"]
+        assert "毎朝メールでチェック" not in body
+        assert "毎日レポート受信" not in body
+        assert "定期" in body
+
+    def test_english_signup_page_does_not_promise_daily_delivery(self, rh):
+        body = rh.handler(_event(_headers={"x-site-lang": "en"}), None)["body"]
+        assert "every morning" not in body
+        assert "Daily reports" not in body
+
+    def test_signup_page_explains_frequency_varies_by_mode(self, rh):
+        body = rh.handler(_event(), None)["body"]
+        assert "短期" in body and "中期" in body and "長期" in body
 
 
 class TestTickerRegistration:
