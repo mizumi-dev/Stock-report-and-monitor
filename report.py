@@ -52,9 +52,11 @@ T = {
     "no_warnings": {LANG_JA: "なし", LANG_EN: "None"},
     "warn_dead_cross": {LANG_JA: "デッドクロス", LANG_EN: "Dead cross"},
     "peg_reference": {LANG_JA: "PEG(参考)", LANG_EN: "PEG (reference)"},
+    "signal_legend_summary": {LANG_JA: "🔎 シグナルの見方・PEGの基準（タップで表示）",
+                              LANG_EN: "🔎 How to read the signals & PEG criteria (tap to expand)"},
     "signal_legend": {
         LANG_JA: (
-            "シグナルの見方: 「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
+            "「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
             "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
             "この選定は<strong>PEG(株価収益率÷利益成長率)を基準にランキング</strong>したもので、"
             "シグナルは現在の値動きの状態を補足する参考情報です。"
@@ -62,7 +64,7 @@ T = {
             "注意してください。"
         ),
         LANG_EN: (
-            "How to read the signals: \"Trend\" is a golden/dead cross (moving average crossover), "
+            "\"Trend\" is a golden/dead cross (moving average crossover), "
             "\"Momentum\" is RSI (overbought/oversold), and \"Volume\" compares against the normal "
             "baseline. This selection is <strong>ranked by PEG ratio</strong> "
             "(P/E ratio ÷ earnings growth rate) — the signals are just "
@@ -301,8 +303,19 @@ def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_
           {_ai_prompt_link(register_base_url, s['ticker'], lang)}
         </div>
         """)
+    # 凡例(シグナルの見方・PEGの基準)は<details>で折りたたむ。この関数はメール本文と
+    # ウェブのプレビューページ(短期・中期・長期の3回分)の両方から使われるため、
+    # 常時表示だと特にプレビューページで文字量が多くなりすぎるとの指摘を受けて変更した。
+    # <details>はHTML/CSSのみで動作しJS不要なため、対応しないメールクライアントでも
+    # 「常に展開された状態」として安全にフォールバックする。
+    legend = (
+        f'<details style="color:#888;font-size:12px;margin:8px 0;">'
+        f'<summary style="cursor:pointer;">{t("signal_legend_summary", lang)}</summary>'
+        f'<p>{t("signal_legend", lang)}</p>'
+        f'</details>'
+    )
     return (f"<p>{t('summary_label', lang)}<br>{summary}</p>"
-           + f'<p style="color:#888;font-size:12px;">{t("signal_legend", lang)}</p>'
+           + legend
            + "".join(cards))
 
 

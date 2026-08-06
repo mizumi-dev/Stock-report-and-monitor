@@ -116,6 +116,50 @@ class TestPreviewPage:
         body = ph.handler(_event(), None)["body"]
         assert 'href="https://pegsignal.com/"' in body
 
+    def test_h1_does_not_claim_today_since_frequency_varies_by_period(self, ph):
+        """短期=毎営業日・中期=週1・長期=月1と更新頻度が期間で異なるため、
+        ページ全体の見出しに「今日の」と断定すると長期・中期の内容と食い違う"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert "今日のPEG" not in body
+        assert "PEGスクリーニング結果（NASDAQ100）" in body
+
+    def test_english_h1_does_not_claim_today(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert "Today's PEG screening results (NASDAQ100)" not in body
+
+    def test_intro_uses_period_not_unexplained_mode_term(self, ph):
+        """「モード」という言葉を説明抜きに使うと伝わらない、との指摘を受けて
+        「期間」に統一した"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        intro = body.split('<h2 id="short"')[0]
+        assert "モード" not in intro
+        assert "期間" in intro
+
+    def test_each_mode_section_has_a_back_to_top_link(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert body.count('href="#top"') == 3
+        assert "トップに戻る" in body
+
+    def test_english_back_to_top_link_present(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert body.count('href="#top"') == 3
+        assert "Back to top" in body
+
+    def test_page_has_top_anchor_for_back_to_top_links_to_target(self, ph):
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert 'id="top"' in body
+
     def test_broker_and_ai_prompt_links_work_without_token(self, ph):
         """証券会社リンク・AIプロンプトリンクはトークン不要で機能する既存の設計を
         プレビューページでも引き継いでいること"""

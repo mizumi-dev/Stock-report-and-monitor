@@ -113,17 +113,17 @@ def _intro_html(lang: str) -> str:
     if lang == LANG_EN:
         return """
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>Today's PEG screening results (NASDAQ100)</h1>
+        <h1>PEG screening results (NASDAQ100)</h1>
         <p>We rank NASDAQ100 growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
-        across three time horizons — short, mid, and long-term. Pick a horizon below, or
-        just scroll through all three.</p>
+        across three time horizons — short-term, mid-term, and long-term. Jump to one of
+        the three below, or just scroll through all of them.</p>
         """
     return """
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>今日のPEGスクリーニング結果（NASDAQ100）</h1>
+    <h1>PEGスクリーニング結果（NASDAQ100）</h1>
     <p>NASDAQ100構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
-    短期・中期・長期の3つの判定期間でランキングしています。
-    下のリンクで見たいモードへ移動するか、そのまま3モード分をご覧ください。</p>
+    短期・中期・長期の3つの期間でランキングしています。
+    下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
     """
 
 
@@ -135,15 +135,21 @@ def _mode_nav_html(lang: str) -> str:
     return f'<div class="mode-nav">{links}</div>'
 
 
+def _back_to_top_html(lang: str) -> str:
+    label = "↑ Back to top" if lang == LANG_EN else "↑ トップに戻る"
+    return f'<p class="muted"><a href="#top">{label}</a></p>'
+
+
 def _mode_section_html(mode: str, lang: str, register_base_url: str) -> str:
     snapshot = _get_selection_snapshot(mode)
     heading = selection_subject(mode, lang).lstrip("📈 ")
     anchor = _ANCHOR[mode]
+    back_to_top = _back_to_top_html(lang)
 
     if snapshot is None:
-        body = ("<p>No data yet for this mode." if lang == LANG_EN
-                else "<p>このモードのデータはまだありません。") + "</p>"
-        return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{body}'
+        body = ("<p>No data yet for this period." if lang == LANG_EN
+                else "<p>この期間のデータはまだありません。") + "</p>"
+        return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{body}{back_to_top}'
 
     body = render_selection_cards(
         snapshot["ranked"], snapshot["signals_map"], register_base_url, lang, register_token=None,
@@ -153,7 +159,7 @@ def _mode_section_html(mode: str, lang: str, register_base_url: str) -> str:
     if as_of:
         text = f"Data as of {as_of}" if lang == LANG_EN else f"{as_of}時点のデータです"
         as_of_note = f'<p class="muted">{text}</p>'
-    return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{as_of_note}{body}'
+    return f'<h2 id="{anchor}">{html.escape(heading)}</h2>{as_of_note}{body}{back_to_top}'
 
 
 def _signup_pitch_html(lang: str, register_url: str) -> str:
@@ -167,7 +173,7 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
         return f"""
         <div class="notice-box">
         <p><strong>Want to track specific stocks, or get this by email?</strong></p>
-        <p>This page always shows today's top picks only. Sign up (free) to additionally:
+        <p>This page always shows the latest top picks only. Sign up (free) to additionally:
         pick individual stocks to watch, get daily/weekly/monthly trend &amp; momentum
         alerts on them, and receive this selection report by email on your chosen
         schedule.</p>
@@ -180,7 +186,7 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     return f"""
     <div class="notice-box">
     <p><strong>個別銘柄を監視したい方・メールで受け取りたい方へ</strong></p>
-    <p>このページは常に「本日の上位銘柄」だけを表示します。登録（無料）すると、
+    <p>このページは常に「最新の上位銘柄」だけを表示します。登録（無料）すると、
     追加で以下が使えるようになります: 気になる銘柄を選んで監視・トレンド/モメンタム
     の変化を通知・この選定レポートを選んだ頻度でメール受信。</p>
     <p><a class="btn-link" href="{url}">申し込む（無料） →</a></p>
@@ -192,15 +198,15 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
 
 
 def _page(inner_html: str, lang: str, status: int = 200) -> dict:
-    title = ("PegSignal — Today's NASDAQ100 PEG screening results"
-             if lang == LANG_EN else "PegSignal — 今日のNASDAQ100 PEGスクリーニング結果")
+    title = ("PegSignal — NASDAQ100 PEG screening results"
+             if lang == LANG_EN else "PegSignal — NASDAQ100 PEGスクリーニング結果")
     footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
     body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">
     <title>{title}</title>
     <style>{_PAGE_STYLE}</style></head>
     <body>
-    <div class="card">
+    <div class="card" id="top">
     {inner_html}
     </div>
     <p class="site-footer muted">{footer}</p>
