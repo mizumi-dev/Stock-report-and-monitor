@@ -31,11 +31,17 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
 
 ## アーキテクチャ
 
-- AWS Lambda 2本構成、リージョンは`us-east-1`固定
+- AWS Lambda 3本構成、リージョンは`us-east-1`固定
   - `register-stock`: 申込み・銘柄登録・退会・各種情報ページ・AIプロンプトページ
     などを担当(`mnt/user-data/outputs/aws_deploy/lambda_register/handler.py`)
   - `daily-batch`: 日次のスクリーニング・監視レポート生成・送信を担当
     (`handler.py`)
+  - `landing-preview`: メールアドレスを登録したくない訪問者向けに、短期・中期・
+    長期の選定レポートを登録不要で閲覧できる読み取り専用ページ(2026-08-06追加、
+    `mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py`)。
+    `app_settings`のselection_snapshotを読むだけで書き込みは一切行わない。
+    本番ドメイン(pegsignal.com/en.pegsignal.com)には未接続の独立URLで、
+    公開判断が下りるまでCloudFrontには載せない
 - マルチテナント設計。`owner_token`でユーザーを識別
 - DynamoDBテーブル:
   - `watchlist`: ユーザーごとの監視銘柄
@@ -45,10 +51,10 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
 - レポートは「バッチが計算し正本を保有、ボタン押下は読み取り専用」の設計。
   個々のユーザーが手動でレポート再送信ボタンを押しても、共有スナップショット
   (`signal_history`等)は上書きされない。この境界を壊す変更をしないこと
-- 2つのLambda間で共有しているロジックファイル: `report.py`・`config.py`・
-  `signals.py`・`ranking.py`・`data_sources.py`・`mailer.py`。片方だけ直して
-  同期を忘れる事故が起きやすいので、共有ファイルを変更したら両Lambda相当の
-  挙動を確認する
+- Lambda間で共有しているロジックファイル: `report.py`・`config.py`・
+  `signals.py`・`ranking.py`・`data_sources.py`・`mailer.py`(`landing-preview`は
+  `report.py`・`config.py`のみ使用)。片方だけ直して同期を忘れる事故が
+  起きやすいので、共有ファイルを変更したら関係する全Lambda相当の挙動を確認する
 - メール送信は`mailer.py`のResendMailer経由(Resend APIを使用)。SESの本番アクセス
   審査が繰り返し即時却下され解決不能と判断し、2026-08-06に乗り換えた。
   boto3のSESクライアントと同じ`send_email(Source=,Destination=,Message=,...)`

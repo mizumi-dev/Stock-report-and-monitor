@@ -122,12 +122,12 @@ _SITE_TITLE = {
 }
 _SITE_DESCRIPTION = {
     LANG_JA: (
-        "PEGレシオで割安な成長株をNASDAQ100構成銘柄から選定し、"
+        "PEGレシオが低い成長株をNASDAQ100構成銘柄から選定し、"
         "トレンド・モメンタム・出来高のシグナルを定期メールで通知する無料サービスです。"
     ),
     LANG_EN: (
-        "A free service that screens NASDAQ100 constituents for undervalued growth stocks "
-        "by PEG ratio and emails you trend, momentum, and volume signals on a regular schedule."
+        "A free service that screens NASDAQ100 constituents for growth stocks with a low "
+        "PEG ratio and emails you trend, momentum, and volume signals on a regular schedule."
     ),
 }
 # ホーム画面に追加した際のアイコン名(iOS)・PWAアプリ名。短く収まる必要がある
@@ -421,7 +421,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         return f"""
         {notice_html}
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>Track undervalued NASDAQ100 growth stocks, delivered on a schedule</h1>
+        <h1>NASDAQ100 growth stocks, ranked by PEG, delivered on a schedule</h1>
         <p class="trust-line">🔒 Your email is used only for report delivery, no spam.
         <a href="?about=1">Delete your data anytime, one click.</a></p>
 
@@ -448,7 +448,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
 
         <details>
           <summary>How stocks are picked, and important notes</summary>
-          <p>We screen NASDAQ100 constituents for undervalued growth stocks by
+          <p>We screen NASDAQ100 constituents for growth stocks with a low
           <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
           we monitor trend, momentum, and volume signals on a regular schedule.</p>
           <p class="muted">How often you hear from us depends on the time horizon you pick
@@ -483,7 +483,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     return f"""
     {notice_html}
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>NASDAQ100の割安な成長株を、定期メールでチェック</h1>
+    <h1>NASDAQ100構成銘柄のPEGスクリーニング結果を、定期メールでチェック</h1>
     <p class="trust-line">🔒 メールはレポート配信にのみ使用・スパムなし・
     <a href="?about=1">いつでも1クリックで完全削除</a>できます。</p>
 
@@ -511,7 +511,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     <details>
       <summary>くわしい選定方法・注意事項</summary>
       <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
-      低く割安な成長株を選定します。登録した銘柄については、トレンド・モメンタム・
+      低い成長株を選定します。登録した銘柄については、トレンド・モメンタム・
       出来高の3種類のシグナルを定期的に監視して通知します。</p>
       <p class="muted">※配信の頻度は選んだ判定期間モードによって変わります
       （短期＝毎営業日、中期＝週1回、長期＝月1回）。あとからいつでも変更できます。</p>
@@ -631,8 +631,8 @@ def _render_about(lang: str = LANG_JA) -> str:
         <h3>About</h3>
         <p>PegSignal is <strong>developed and operated by a single individual</strong>, not a
         company. Planning, development, and operations are all handled by one person.</p>
-        <p>It's a free service that picks undervalued growth stocks from the NASDAQ100
-        constituents by PEG ratio and emails you signals. See
+        <p>It's a free service that picks NASDAQ100 growth stocks ranked by PEG ratio
+        and emails you signals. See
         <a href="?info=1">how it works</a> for the logic details.</p>
 
         <h4>How we handle your email address</h4>
@@ -651,7 +651,7 @@ def _render_about(lang: str = LANG_JA) -> str:
     <h3>運営者情報</h3>
     <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
     です。法人ではなく、企画・開発・運用のすべてを個人で行っています。</p>
-    <p>NASDAQ100構成銘柄からPEGレシオで割安な成長株を選定し、シグナルをメール配信する
+    <p>NASDAQ100構成銘柄からPEGレシオが低い成長株を選定し、シグナルをメール配信する
     無料サービスです。判定ロジックの詳細は<a href="?info=1">この仕組みについて</a>を
     ご覧ください。</p>
 
@@ -933,7 +933,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
         guaranteed.</p>
 
         <details open>
-          <summary>📈 Selection report — auto-picks undervalued growth stocks by PEG ratio</summary>
+          <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
           <p>Universe: NASDAQ100 constituents (fetched from NASDAQ's official API). Only stocks
           meeting both conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
@@ -943,7 +943,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
           </ul>
           <p class="muted">PEG, earnings growth, market cap, and price all come from
           <strong>Yahoo Finance (the yfinance library)</strong>. PEG is "P/E ratio ÷ earnings
-          growth rate" — lower means more undervalued relative to growth. We don't recalculate it
+          growth rate" — a lower PEG means the price is lower relative to growth. We don't recalculate it
           ourselves. Send frequency depends on the mode (short-term = every trading day,
           mid-term = every Monday, long-term = first Monday of the month).</p>
           <p class="muted">Delivery timing: before the US market opens (6:00am US Eastern Time),
@@ -1003,7 +1003,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     依存しており正確性・遅延を保証しません。</p>
 
     <details open>
-      <summary>📈 選定レポート — PEGレシオが低い割安な成長株を自動選定</summary>
+      <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
       <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）。次の条件を両方満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
@@ -1012,7 +1012,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
       </ul>
       <p class="muted">PEG・利益成長率・時価総額・株価は<strong>Yahoo Finance
       （yfinanceライブラリ）</strong>から取得。PEGは「株価収益率(PER) ÷ 利益成長率」で、
-      低いほど成長性に対して割安とされる指標です。当サービスでの再計算はしていません。
+      低いほど株価が利益成長率に対して低い水準にあることを示す指標です。当サービスでの再計算はしていません。
       発行頻度はモードによって異なります（短期=毎営業日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
       <p class="muted">配信タイミング: 米国市場が開く前（米東部時間 朝6:00、日本時間では
       夏時間中は夜19:00頃・冬時間中は夜20:00頃）に、直前の取引日までのデータで配信します。
@@ -1159,14 +1159,15 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p class="fig-cap">Sign up with your email, choose the stocks you care about,
         and reports arrive automatically.</p>
         <p>PegSignal looks at the 100 largest non-financial companies on the NASDAQ
-        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on), finds the ones that look
-        <strong>cheap relative to how fast they're growing</strong>, and emails you the list.
-        It also watches the specific stocks you pick and tells you when something changes.</p>
+        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on), ranks them by
+        <strong>PEG ratio — price relative to how fast they're growing</strong>, and emails
+        you the list. It also watches the specific stocks you pick and tells you when
+        something changes.</p>
 
         <h4>2. The two emails you'll receive</h4>
         <div class="guide-card">
           <span class="tag">📈 Selection report</span>
-          <h4>"Here are cheap-looking growth stocks right now"</h4>
+          <h4>"Here are today's top picks by PEG ratio"</h4>
           <p>A ranked list picked automatically from all NASDAQ100 stocks. You don't have to
           set anything up — this arrives on its own.</p>
         </div>
@@ -1178,12 +1179,13 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         </div>
 
         <h4>3. What "PEG ratio" means</h4>
-        {_svg_peg("P/E ratio", "Growth rate", "PEG", "Cheap", "Expensive")}
-        <p class="fig-cap">PEG = price valuation ÷ growth rate. Lower is cheaper.</p>
-        <p>A stock can have a high price tag and still be reasonable <em>if</em> the company is
-        growing fast. PEG captures exactly that: it divides how expensive the stock looks by how
-        fast profits are growing. <strong>A lower PEG means you're paying less for each unit of
-        growth.</strong> We only include stocks with a PEG between 0 and {MAX_PEG}, and earnings
+        {_svg_peg("P/E ratio", "Growth rate", "PEG", "Low PEG", "High PEG")}
+        <p class="fig-cap">PEG = P/E ratio ÷ growth rate. Lower means the price is smaller
+        relative to growth.</p>
+        <p>A stock can have a high P/E ratio and still be reasonable <em>if</em> the company is
+        growing fast. PEG captures exactly that: it divides the P/E ratio by how fast profits
+        are growing. <strong>A lower PEG means the price is lower relative to that growth.
+        </strong> We only include stocks with a PEG between 0 and {MAX_PEG}, and earnings
         growth of {MIN_GROWTH * 100:.0f}% or more.</p>
 
         <h4>4. Reading the signal lamps</h4>
@@ -1251,14 +1253,14 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p class="fig-cap">メールアドレスを登録し、気になる銘柄を選ぶだけ。
     あとは自動でレポートが届きます。</p>
     <p>PegSignalは、米国NASDAQ市場の代表的な100社（「NASDAQ100」。Apple・Microsoft・
-    NVIDIAなど）の中から、<strong>成長のわりに株価が安く見える銘柄</strong>を自動で
-    探してメールでお知らせします。さらに、あなたが選んだ銘柄については値動きを
-    見張って、変化があればお知らせします。</p>
+    NVIDIAなど）の中から、<strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
+    自動でランキングしてメールでお知らせします。さらに、あなたが選んだ銘柄については
+    値動きを見張って、変化があればお知らせします。</p>
 
     <h4>2. 届くメールは2種類</h4>
     <div class="guide-card">
       <span class="tag">📈 選定レポート</span>
-      <h4>「今、割安に見える成長株はこれです」</h4>
+      <h4>「今、PEGレシオが低い成長株はこれです」</h4>
       <p>NASDAQ100の全銘柄から自動で選んだランキングです。何も設定しなくても
       勝手に届きます。</p>
     </div>
@@ -1270,11 +1272,12 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     </div>
 
     <h4>3. 「PEGレシオ」ってなに？</h4>
-    {_svg_peg("PER(割高さ)", "利益成長率", "PEG", "割安", "割高")}
-    <p class="fig-cap">PEG＝株価の割高さ ÷ 成長の速さ。小さいほど割安。</p>
-    <p>株価が高くても、その会社が急成長しているなら「妥当」かもしれません。PEGは
-    まさにそれを測る指標で、<strong>株価の割高さを、利益の成長の速さで割った値</strong>
-    です。<strong>PEGが小さいほど、成長のわりに安く買える</strong>ことを意味します。
+    {_svg_peg("PER(株価収益率)", "利益成長率", "PEG", "PEG低い", "PEG高い")}
+    <p class="fig-cap">PEG＝PER(株価収益率) ÷ 成長の速さ。数値が小さいほど、
+    成長に対して株価の水準が低いことを示します。</p>
+    <p>株価収益率(PER)が高くても、その会社が急成長しているなら「妥当」かもしれません。
+    PEGはまさにそれを測る指標で、<strong>PERを、利益の成長率で割った値</strong>です。
+    <strong>PEGが小さいほど、成長率に対して株価の水準が低い</strong>ことを意味します。
     本サービスでは、PEGが0〜{MAX_PEG}の範囲かつ利益成長率が{MIN_GROWTH * 100:.0f}%以上の
     銘柄だけを対象にしています。</p>
 

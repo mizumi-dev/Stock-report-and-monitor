@@ -500,6 +500,22 @@ class TestWordingMatchesImplementation:
         body = rh.handler(_event(guide="1"), None)["body"]
         assert "PEGが0〜" in body
 
+    def test_public_pages_avoid_value_judgment_wording_about_stocks(self, rh):
+        """「割安」「安く買える」等、特定銘柄の価値を断定する表現は使わない。
+        PEGレシオという客観的指標に基づく機械的な選定であることに表現を統一する
+        (金商法(投資助言業)リスク低減の方針、TODO.md参照。「買い時レポート」を
+        「PEGスクリーニング結果」に改めた過去の対応と同じ考え方)"""
+        for params in ({}, {"about": "1"}, {"info": "1"}, {"guide": "1"}):
+            body = rh.handler(_event(**params), None)["body"]
+            assert "割安" not in body, f"{params}: '割安'が残っている"
+            assert "安く買え" not in body, f"{params}: '安く買え'が残っている"
+
+    def test_english_public_pages_avoid_value_judgment_wording(self, rh):
+        for params in ({}, {"about": "1"}, {"info": "1"}, {"guide": "1"}):
+            body = rh.handler(_event(_headers={"x-site-lang": "en"}, **params), None)["body"]
+            assert "undervalued" not in body.lower(), f"{params}: 'undervalued'が残っている"
+            assert "cheap" not in body.lower(), f"{params}: 'cheap'が残っている"
+
 
 class TestTickerRegistration:
     def test_register_valid_ticker(self, rh):

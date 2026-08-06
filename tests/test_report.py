@@ -152,6 +152,25 @@ def test_selection_report_includes_signal_legend():
     assert "PEG" in body and "参考情報" in body
 
 
+def test_signal_legend_is_collapsible_via_details_element():
+    """常時表示だと文字量が多いとの指摘を受け、<details>で折りたためるようにした。
+    JS不要のHTML標準機能のため、対応しないメールクライアントでも展開済み表示に
+    フォールバックし壊れない。"""
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "<details" in body and "<summary" in body
+    # 折りたたみ済みでも内容自体はHTML上に存在すること(クローラー・アクセシビリティ対応)
+    assert "参考情報" in body
+
+
+def test_signal_legend_summary_label_is_english_when_lang_is_en():
+    ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
+    signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+    assert "How to read the signals" in body
+
+
 def test_selection_report_distinguishes_fresh_cross_from_continued_alignment():
     ranked = [
         {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
