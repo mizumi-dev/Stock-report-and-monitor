@@ -49,7 +49,10 @@ SIGNUPS_ENABLED = os.environ.get("SIGNUPS_ENABLED", "true").lower() != "false"
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
-ses = boto3.client("ses")
+# SESの本番アクセス審査がus-east-1で行き詰まった(却下履歴+アカウントに保存された
+# WebsiteURLが古いまま修正不可)ため、SES呼び出し先だけ別リージョンに切り替え
+# られるようにする。他のリソース(DynamoDB等)はLambda実行リージョン(us-east-1)のまま。
+ses = boto3.client("ses", region_name=os.environ.get("SES_REGION") or None)
 
 # ASCII英大文字・数字のみ1〜6文字。isalnum()は全角文字等も通すため正規表現で制限する
 TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")

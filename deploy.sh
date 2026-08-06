@@ -17,6 +17,10 @@ set -euo pipefail
 export AWS_REGION="us-east-1"
 export SES_SENDER="noreply@pegsignal.com"       # pegsignal.comをSESでドメイン認証済み(TXT+DKIM)
 export SES_RECIPIENT="amsllr759@gmail.com"      # 事業用アドレス。レポート送付先(サンドボックスなら要検証)
+export SES_REGION=""                            # 空ならAWS_REGIONと同じ(Lambda実行リージョン)を使う。
+                                                 # us-east-1でのSES本番アクセス審査が行き詰まった場合、
+                                                 # 例えば"ap-northeast-1"等、SESの送信呼び出し先だけ
+                                                 # 別リージョンに切り替えられる(他リソースはAWS_REGIONのまま)
 export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
@@ -166,7 +170,7 @@ aws lambda create-function \
   --zip-file fileb://daily_batch.zip \
   --timeout 900 --memory-size 512 \
   --layers "$LAYER_ARN" \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,SES_REGION=$SES_REGION,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
     --zip-file fileb://daily_batch.zip --region $AWS_REGION
@@ -183,7 +187,7 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://register.zip \
   --timeout 30 --memory-size 128 \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,SES_REGION=$SES_REGION,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
     --zip-file fileb://register.zip --region $AWS_REGION
@@ -233,13 +237,13 @@ echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを
 aws lambda update-function-configuration \
   --function-name daily-batch \
   --timeout 900 \
-  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
+  --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,SES_REGION=$SES_REGION,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
   --region $AWS_REGION
 
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
 aws lambda update-function-configuration \
   --function-name register-stock \
-  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
+  --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,SES_REGION=$SES_REGION,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
   --region $AWS_REGION
 
 echo "=== 9. EventBridge Scheduler 設定(毎営業日 米東部6:00、米国市場の寄り付き(9:30 ET)より前) ==="

@@ -46,7 +46,10 @@ IS_WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_WEEKDAY", "0")  # 0=月曜
 TOP_N = int(os.environ.get("TOP_N", "3"))
 
 dynamodb = boto3.resource("dynamodb")
-ses = boto3.client("ses")
+# SESの本番アクセス審査がus-east-1で行き詰まった(却下履歴+アカウントに保存された
+# WebsiteURLが古いまま修正不可)ため、SES呼び出し先だけ別リージョンに切り替え
+# られるようにする。他のリソース(DynamoDB等)はLambda実行リージョン(us-east-1)のまま。
+ses = boto3.client("ses", region_name=os.environ.get("SES_REGION") or None)
 
 
 def _today_str():
