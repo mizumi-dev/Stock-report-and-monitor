@@ -1,6 +1,27 @@
 # 残課題
 
-最終更新: 2026-08-05
+最終更新: 2026-08-06
+
+## en.pegsignal.comインフラの実デプロイ（2026-08-06）
+
+英語版サイトの残件だった、コード用意済み・未実行のインフラスクリプト2本を実行した。
+
+- **対応済み**: `deploy_domain_en.sh`を実行。`en.pegsignal.com`用のACM証明書
+  (DNS検証、us-east-1)・CloudFrontディストリビューション(オリジンに
+  `X-Site-Lang: en`ヘッダーを常時付与)・Route53 ALIASレコードを新規作成
+- **対応済み**: `deploy_patch_ja_lang_header.sh`を実行。既存の`pegsignal.com`側
+  ディストリビューションのオリジンにも対になる`X-Site-Lang: ja`ヘッダーを追加
+- **IAM運用メモ**: 実行にはACM・CloudFront・Route53の権限が新たに必要だった。
+  `claude-deploy`ユーザーの既存インラインポリシー合計が2048バイト上限に近く、
+  追加の余地を作るため`dynamodb-multi-tenant-migration`(Query権限のみ)を
+  `deploy-scoped`ポリシーに統合してから、新規`en-domain-deploy`ポリシー
+  (ACM/CloudFront/Route53、必要最小限のアクションのみ)を追加
+- **実地確認済み**: `https://en.pegsignal.com/`にアクセスし、英語で表示されることを
+  確認(現在は`SIGNUPS_ENABLED=false`のため新規登録一時停止画面が表示されるが、
+  その画面自体が英語で出ることを確認できたため、`X-Site-Lang`ヘッダーによる
+  言語判定が正しく機能していることも合わせて確認できた)
+- この開発環境からは外部ネットワークへのアクセスが制限されており、動作確認は
+  ユーザーの実機ブラウザで実施した
 
 ## 【セキュリティインシデント】リポジトリが公開設定で機密情報が露出していた（2026-08-05）
 
