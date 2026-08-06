@@ -31,6 +31,7 @@ from config import (
     user_period_mode_key,
 )
 from data_sources import get_nasdaq100_tickers, get_stock_data
+from mailer import ResendMailer
 from signals import calc_all_signals
 from ranking import rank_stocks
 from report import build_selection_report, build_monitoring_report, selection_subject
@@ -46,7 +47,10 @@ IS_WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_WEEKDAY", "0")  # 0=月曜
 TOP_N = int(os.environ.get("TOP_N", "3"))
 
 dynamodb = boto3.resource("dynamodb")
-ses = boto3.client("ses")
+# SESの本番アクセス審査がus-east-1・大阪どちらでも即時却下となり解決不能と
+# 判断したため、Resend(mailer.py)に乗り換えた。ses変数名・呼び出し方は
+# 既存コードとの互換のためそのまま残している。
+ses = ResendMailer()
 
 
 def _today_str():

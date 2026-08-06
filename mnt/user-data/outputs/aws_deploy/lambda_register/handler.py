@@ -34,6 +34,7 @@ from config import (
     normalize_mode,
     user_period_mode_key,
 )
+from mailer import ResendMailer
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 APPROVED_TOKENS_TABLE = os.environ.get("APPROVED_TOKENS_TABLE", "approved_tokens")
@@ -49,7 +50,10 @@ SIGNUPS_ENABLED = os.environ.get("SIGNUPS_ENABLED", "true").lower() != "false"
 
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
-ses = boto3.client("ses")
+# SESの本番アクセス審査がus-east-1・大阪どちらでも即時却下となり解決不能と
+# 判断したため、Resend(mailer.py)に乗り換えた。ses変数名・呼び出し方は
+# 既存コードとの互換のためそのまま残している。
+ses = ResendMailer()
 
 # ASCII英大文字・数字のみ1〜6文字。isalnum()は全角文字等も通すため正規表現で制限する
 TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")

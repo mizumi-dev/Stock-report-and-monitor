@@ -33,12 +33,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Build daily-batch zip
-        run: zip daily_batch.zip handler.py config.py signals.py data_sources.py ranking.py report.py
+        run: zip daily_batch.zip handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py
 
       - name: Build register-stock zip
         run: |
           (cd mnt/user-data/outputs/aws_deploy/lambda_register && zip "$OLDPWD/register.zip" handler.py)
-          zip -j register.zip config.py
+          zip -j register.zip config.py mailer.py
 
       - name: Deploy daily-batch
         run: |

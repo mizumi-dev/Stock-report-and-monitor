@@ -5,6 +5,36 @@
 完了したタスクは`TODO_ARCHIVE.md`に移動済み。ここには未着手・要検討の項目が
 残っているセクションのみを置く。
 
+## メール配信をSESからResendへ乗り換え（2026-08-06）
+
+SESの本番アクセス審査が、us-east-1(2回却下)・大阪ap-northeast-3(正しい情報で
+申請したが数秒で即時DENIED)のどちらでも通らず、**AWSアカウント単位で何らかの
+自動判定フラグが立っている可能性が高い**と判断。「外部依存を増やしたくない」
+という以前の方針を見直し、Resend(https://resend.com)への乗り換えを決定。
+
+- **対応済み**: 共有モジュール`mailer.py`を新設。boto3のSESクライアントと
+  同じ`send_email(Source=,Destination=,Message=,ReplyToAddresses=)`という
+  キーワード引数インターフェースを持つ`ResendMailer`を実装し、`daily-batch`・
+  `register-stock`両方の呼び出し箇所(計5箇所)は無変更で乗り換え完了
+  (`ses = ResendMailer()`に差し替えるだけで済んだ)
+- **対応済み**: `deploy.sh`・`.github/workflows/deploy.yml`の両方で
+  `mailer.py`をzipに含めるよう修正。`SES_REGION`(乗り換え検討時に追加した
+  ものの結局不要になった環境変数)を削除し`RESEND_API_KEY`に置き換え。
+  Lambda実行ロールの`ses:SendEmail`権限も不要になったため削除
+- テスト3件追加(`tests/test_mailer.py`)、全143件pass
+- **未着手・要ユーザー対応**:
+  1. Resendでアカウント作成(https://resend.com)
+  2. Resendダッシュボードで`pegsignal.com`をドメイン追加し、指示されるSPF/DKIM
+     レコードをRoute53に追加してドメイン認証を完了させる(DMARCは追加済みの
+     ものをそのまま使える)
+  3. Resend APIキーを発行し、**チャットに貼らず**両Lambdaの環境変数
+     `RESEND_API_KEY`にAWSコンソールから直接設定する(認証情報をチャット・
+     リポジトリに残さない運用を徹底するため)
+  4. 実際にメールが届くか実地確認(お問い合わせフォーム・確認メール等)
+- **保留**: 大阪リージョンで進めていたSESの申請(ケースID: 178602306000835)は
+  返信して様子を見るか判断待ち。Resendへの乗り換えが完了すれば、SES側の
+  結果を待つ必要性は薄れる
+
 ## CI/CD自動デプロイパイプラインの構築（2026-08-06、動作確認中）
 
 `deploy.sh`は整備済みだが実行はAWS CLIを手で叩く運用で、masterマージ後の
