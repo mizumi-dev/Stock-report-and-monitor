@@ -26,6 +26,58 @@ def test_selection_report_footer_link_has_no_query_ampersand():
     assert 'href="https://pegsignal.com/?token=tok123"' in body
 
 
+def test_selection_report_strongest_signals_counts_buy_only_not_sell():
+    """sell_trend/sell_momentumは「シグナルが最も強い」の対象外(バグ修正)。
+    デッドクロス+買われすぎ(2件の売りシグナル)を持つ銘柄が、買いシグナル1件の
+    銘柄より「強い」と誤って紹介されてはいけない。"""
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": False, "buy_momentum": False,
+                "sell_trend": True, "sell_momentum": True, "volume_high": True},
+        "BBB": {"buy_trend": True, "buy_momentum": False,
+                "sell_trend": False, "sell_momentum": False, "volume_high": False},
+    }
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "シグナルが最も強いのは BBB です。" in body
+
+
+def test_selection_report_strongest_signals_lists_all_tied_tickers():
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+        "BBB": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+    }
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "シグナルが最も強いのは AAA・BBB です。" in body
+
+
+def test_selection_report_strongest_signals_ties_are_english_when_lang_is_en():
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+        "BBB": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+    }
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
+    assert "Strongest signals: AAA / BBB." in body
+
+
+def test_selection_report_strongest_signals_none_when_no_buy_signal():
+    ranked = [{"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3}]
+    signals_map = {"AAA": {"buy_trend": False, "buy_momentum": False,
+                           "sell_trend": True, "volume_high": True}}
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "現在、買いシグナルが点灯している銘柄はありません。" in body
+
+
 def test_selection_report_includes_broker_links():
     ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
     signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False,

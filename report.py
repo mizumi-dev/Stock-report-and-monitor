@@ -234,20 +234,31 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
         body_rows = f"<p>{t('no_candidates', lang)}</p>"
     else:
         top = ranked[0]
-        strongest = max(
-            ranked,
-            key=lambda s: sum(1 for v in signals_map.get(s["ticker"], {}).values() if v is True),
-        )
-        if lang == LANG_EN:
-            summary = (
-                f"Top by PEG: {top['ticker']} (PEG {top['peg']:.2f}). "
-                f"Strongest signals: {strongest['ticker']}."
+        # 「シグナルが最も強い」は買いシグナル(buy_trend・buy_momentum)のみを数える。
+        # volume_highは買い/売りの方向を持たない参考指標のため対象外(_render_info参照)。
+        # 以前はsell系も同じ重みで数えており、デッドクロス等の警告銘柄を誤って
+        # 「シグナルが最も強い」と紹介してしまうバグがあった。
+        buy_counts = {
+            s["ticker"]: sum(
+                1 for k in ("buy_trend", "buy_momentum") if signals_map.get(s["ticker"], {}).get(k)
             )
+            for s in ranked
+        }
+        max_count = max(buy_counts.values())
+        strongest_tickers = [s["ticker"] for s in ranked if buy_counts[s["ticker"]] == max_count]
+
+        if max_count == 0:
+            strongest_note = ("No stock currently shows a buy signal." if lang == LANG_EN
+                              else "現在、買いシグナルが点灯している銘柄はありません。")
+        elif lang == LANG_EN:
+            strongest_note = f"Strongest signals: {' / '.join(strongest_tickers)}."
         else:
-            summary = (
-                f"PEG最上位は {top['ticker']}（PEG {top['peg']:.2f}）。"
-                f"シグナルが最も強いのは {strongest['ticker']} です。"
-            )
+            strongest_note = f"シグナルが最も強いのは {'・'.join(strongest_tickers)} です。"
+
+        if lang == LANG_EN:
+            summary = f"Top by PEG: {top['ticker']} (PEG {top['peg']:.2f}). {strongest_note}"
+        else:
+            summary = f"PEG最上位は {top['ticker']}（PEG {top['peg']:.2f}）。{strongest_note}"
 
         cards = []
         for i, s in enumerate(ranked, 1):
