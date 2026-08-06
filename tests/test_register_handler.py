@@ -277,6 +277,96 @@ class TestLanguage:
         assert "中期" not in r["body"]
 
 
+class TestLanguageConsistency:
+    """英語表示時にページのどこか一部だけ日本語が残ってしまう事故を防ぐ。
+    本文だけでなく、<title>・meta・PWAマニフェスト等の「目立たないが利用者に
+    見える」箇所も対象にする。"""
+
+    def test_page_title_and_description_are_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        title = re.search(r"<title>(.*?)</title>", r["body"], re.S).group(1)
+        description = re.search(r'<meta name="description" content="(.*?)"', r["body"], re.S).group(1)
+        assert "株式レポートサービス" not in title
+        assert "PegSignal" in title
+        assert "NASDAQ100" in description
+        assert "割安な成長株" not in description
+
+    def test_page_title_is_japanese_by_default(self, rh):
+        r = rh.handler(_event(), None)
+        title = re.search(r"<title>(.*?)</title>", r["body"], re.S).group(1)
+        assert "株式レポートサービス" in title
+
+    def test_html_lang_attribute_matches_display_language(self, rh):
+        assert '<html lang="en"' in rh.handler(_event(_headers={"x-site-lang": "en"}), None)["body"]
+        assert '<html lang="ja"' in rh.handler(_event(), None)["body"]
+
+    def test_home_screen_app_title_is_english_when_lang_is_en(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        app_title = re.search(
+            r'<meta name="apple-mobile-web-app-title" content="(.*?)"', r["body"]
+        ).group(1)
+        assert app_title == "PegSignal"
+
+    def test_manifest_is_english_when_lang_param_is_en(self, rh):
+        manifest = json.loads(rh.handler(_event(manifest="1", lang="en"), None)["body"])
+        assert manifest["lang"] == "en"
+        assert "株式レポート" not in manifest["name"]
+        assert "株式レポート" not in manifest["short_name"]
+
+    def test_manifest_is_japanese_by_default(self, rh):
+        manifest = json.loads(rh.handler(_event(manifest="1"), None)["body"])
+        assert manifest["short_name"] == "株式レポート"
+
+    def test_manifest_link_carries_display_language(self, rh):
+        """manifestはブラウザが別リクエストで取りに来るため、X-Site-Langヘッダーが
+        付かない。_page()側が?lang=を埋めていないと英語利用者に日本語アプリ名が出る"""
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        assert 'href="?manifest=1&amp;lang=en"' in r["body"]
+
+    def test_mode_change_notice_uses_english_label(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, mode="MID"), None)
+        assert "Mid-term" in r["body"]
+        assert "中期" not in r["body"]
+
+    def test_invalid_ticker_error_has_english_back_link(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="nv da!"), None)
+        assert r["statusCode"] == 400
+        assert "Invalid ticker." in r["body"]
+        assert "戻る" not in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_ai_prompt_invalid_ticker_error_is_fully_english(self, rh):
+        r = rh.handler(_event(ai_prompt="1", ticker="nv da!", lang="en"), None)
+        assert r["statusCode"] == 400
+        assert "戻る" not in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_account_deleted_page_is_fully_english(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, delete_account_confirm="1"), None)
+        assert "Account deleted" in r["body"]
+        assert "運営者情報" not in r["body"]
+
+    def test_invalid_confirm_link_message_follows_request_language(self, rh):
+        r_en = rh.handler(_event(_headers={"x-site-lang": "en"}, token="bogus", confirm="1"), None)
+        assert r_en["statusCode"] == 404
+        assert "無効なリンクです" not in r_en["body"]
+        assert "運営者情報" not in r_en["body"]
+
+        r_ja = rh.handler(_event(token="bogus", confirm="1"), None)
+        assert "無効なリンクです" in r_ja["body"]
+
+    def test_report_send_failure_page_is_fully_english(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        rh.lambda_client.invoke.side_effect = RuntimeError("boom")
+        r = rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        assert r["statusCode"] == 500
+        assert "戻る" not in r["body"]
+        assert "運営者情報" not in r["body"]
+
+
 class TestTickerRegistration:
     def test_register_valid_ticker(self, rh):
         r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)

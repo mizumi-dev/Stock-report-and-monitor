@@ -116,11 +116,23 @@ _ICON_SVG = (
 _ICON_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(_ICON_SVG.encode()).decode()
 
 
-_SITE_TITLE = "PegSignal（株式レポートサービス） | NASDAQ100 成長株シグナル配信"
-_SITE_DESCRIPTION = (
-    "PEGレシオで割安な成長株をNASDAQ100構成銘柄から選定し、"
-    "トレンド・モメンタム・出来高のシグナルを毎日メールで通知する無料サービスです。"
-)
+_SITE_TITLE = {
+    LANG_JA: "PegSignal（株式レポートサービス） | NASDAQ100 成長株シグナル配信",
+    LANG_EN: "PegSignal | NASDAQ100 growth-stock signal alerts",
+}
+_SITE_DESCRIPTION = {
+    LANG_JA: (
+        "PEGレシオで割安な成長株をNASDAQ100構成銘柄から選定し、"
+        "トレンド・モメンタム・出来高のシグナルを毎日メールで通知する無料サービスです。"
+    ),
+    LANG_EN: (
+        "A free service that screens NASDAQ100 constituents for undervalued growth stocks "
+        "by PEG ratio and emails you trend, momentum, and volume signals daily."
+    ),
+}
+# ホーム画面に追加した際のアイコン名(iOS)・PWAアプリ名。短く収まる必要がある
+_APP_SHORT_NAME = {LANG_JA: "株式レポート", LANG_EN: "PegSignal"}
+_APP_NAME = {LANG_JA: "株式レポートサービス", LANG_EN: "PegSignal stock reports"}
 
 
 # 個人開発のLambda単体サービスであることが伝わるよう、外部CSS/フォントは使わず
@@ -198,15 +210,15 @@ def _page(inner_html: str, status=200, lang: str = LANG_JA):
             '<a href="?privacy=1">プライバシーポリシー</a> ・ <a href="?terms=1">利用規約</a>'
         )
     return _response(
-        f"""<html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <meta charset="utf-8">
-        <title>{_SITE_TITLE}</title>
-        <meta name="description" content="{_SITE_DESCRIPTION}">
+        <title>{_SITE_TITLE[lang]}</title>
+        <meta name="description" content="{_SITE_DESCRIPTION[lang]}">
         <meta name="theme-color" content="#0f172a">
-        <link rel="manifest" href="?manifest=1">
+        <link rel="manifest" href="?manifest=1&amp;lang={lang}">
         <link rel="apple-touch-icon" href="{_ICON_DATA_URI}">
         <meta name="apple-mobile-web-app-capable" content="yes">
-        <meta name="apple-mobile-web-app-title" content="株式レポート">
+        <meta name="apple-mobile-web-app-title" content="{_APP_SHORT_NAME[lang]}">
         <style>{_PAGE_STYLE}</style></head>
         <body>
         <div class="card">
@@ -218,12 +230,15 @@ def _page(inner_html: str, status=200, lang: str = LANG_JA):
     )
 
 
-def _handle_manifest() -> dict:
+def _handle_manifest(lang: str = LANG_JA) -> dict:
     """Web App Manifest。start_urlは意図的に省略し、
-    インストール元ページ(招待トークン付きURL)がそのまま起動先になるようにする"""
+    インストール元ページ(招待トークン付きURL)がそのまま起動先になるようにする。
+    manifestはブラウザが別リクエストで取りに来るため、X-Site-Langヘッダーだけに
+    頼らず_page()側で?lang=を付けたURLを埋め込み、その値で言語を決める。"""
     manifest = {
-        "name": "株式レポートサービス",
-        "short_name": "株式レポート",
+        "lang": lang,
+        "name": _APP_NAME[lang],
+        "short_name": _APP_SHORT_NAME[lang],
         "display": "standalone",
         "background_color": "#0f172a",
         "theme_color": "#0f172a",
@@ -238,8 +253,9 @@ def _handle_manifest() -> dict:
     }
 
 
-def _back_link(token: str) -> str:
-    return f'<p><a href="?token={html.escape(token)}">戻る</a></p>'
+def _back_link(token: str, lang: str = LANG_JA) -> str:
+    label = "Back" if lang == LANG_EN else "戻る"
+    return f'<p><a href="?token={html.escape(token)}">{label}</a></p>'
 
 
 def _get_token_item(token: str) -> dict | None:
@@ -1182,20 +1198,26 @@ def _handle_delete_account(token: str, lang: str = LANG_JA) -> dict:
         return _page(
             "<h3>Account deleted</h3>"
             "<p>All your data has been permanently deleted. Thank you for trying PegSignal.</p>"
-            '<p>You\'re welcome back anytime. <a href="?">Home</a></p>'
+            '<p>You\'re welcome back anytime. <a href="?">Home</a></p>',
+            lang=lang,
         )
     return _page(
         "<h3>退会が完了しました</h3>"
         "<p>登録データはすべて削除されました。ご利用ありがとうございました。</p>"
-        '<p>またのご利用をお待ちしております。<a href="?">トップページ</a></p>'
+        '<p>またのご利用をお待ちしております。<a href="?">トップページ</a></p>',
+        lang=lang,
     )
 
 
-def _handle_confirm(token: str, token_item: dict | None = None) -> dict:
-    """token_itemを渡せば、handler()側で既に取得済みのDynamoDB読み取り結果を再利用できる。"""
+def _handle_confirm(token: str, token_item: dict | None = None,
+                    request_lang: str = LANG_JA) -> dict:
+    """token_itemを渡せば、handler()側で既に取得済みのDynamoDB読み取り結果を再利用できる。
+    トークンが無効な場合は保存済みの言語設定が読めないため、アクセス元ドメインから
+    判定したrequest_langで表示する。"""
     item = token_item if token_item is not None else _get_token_item(token)
     if not item:
-        return _page("<p>無効なリンクです。</p>", status=404)
+        msg = "This link is not valid." if request_lang == LANG_EN else "無効なリンクです。"
+        return _page(f"<p>{msg}</p>", status=404, lang=request_lang)
     if item.get("status") == TOKEN_STATUS_PENDING:
         table = dynamodb.Table(APPROVED_TOKENS_TABLE)
         table.put_item(Item={**item, "status": TOKEN_STATUS_APPROVED,
@@ -1270,13 +1292,16 @@ def handler(event, context):
     lang = _get_user_lang(token_item) if token_item else _detect_request_lang(event)
 
     if params.get("confirm"):
-        return _handle_confirm(token, token_item)
+        return _handle_confirm(token, token_item, lang)
 
     if params.get("signup_email"):
         return _handle_signup(params, lang)
 
     if params.get("manifest"):
-        return _handle_manifest()
+        # manifestはブラウザが単独で取得するためX-Site-Langが付かないことがある。
+        # _page()が埋め込む?lang=を優先し、無ければリクエスト判定にフォールバックする
+        manifest_lang = params.get("lang") if params.get("lang") in SUPPORTED_LANGS else lang
+        return _handle_manifest(manifest_lang)
 
     if params.get("privacy"):
         return _page(_render_privacy(lang), lang=lang)
@@ -1308,7 +1333,7 @@ def handler(event, context):
         ticker = (params.get("ticker") or "").strip().upper()
         if not TICKER_RE.match(ticker):
             msg = "Invalid ticker." if ai_lang == LANG_EN else "無効なティッカーです。"
-            return _page(f"<p>{msg}</p>{_back_link(token)}", status=400, lang=ai_lang)
+            return _page(f"<p>{msg}</p>{_back_link(token, ai_lang)}", status=400, lang=ai_lang)
         return _page(_render_ai_prompt(ticker, ai_lang), lang=ai_lang)
 
     if not (token_item and token_item.get("status") == TOKEN_STATUS_APPROVED):
@@ -1333,9 +1358,11 @@ def handler(event, context):
     # 期間モードの変更
     if params.get("mode"):
         mode = set_period_mode(token, params["mode"])
-        label = get_preset(mode)["label"]
-        notice = (f'Time horizon changed to "{label}". This applies from the next report.' if lang == LANG_EN
-                  else f"判定期間を「{label}」に変更しました。次回のレポートから反映されます。")
+        preset = get_preset(mode)
+        # 英語表示時に日本語のラベル(「中期」等)が混ざらないよう、言語ごとのラベルを使う
+        notice = (f'Time horizon changed to "{preset["label_en"]}". This applies from the next report.'
+                  if lang == LANG_EN
+                  else f"判定期間を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     # レポートの即時送信(非同期起動)
@@ -1353,7 +1380,7 @@ def handler(event, context):
         except Exception as e:
             err_msg = (f"Failed to send the {label_en.lower()} report: {html.escape(str(e))}" if lang == LANG_EN
                        else f"{label}レポートの送信に失敗しました: {html.escape(str(e))}")
-            return _page(f"<p>{err_msg}</p>{_back_link(token)}", status=500)
+            return _page(f"<p>{err_msg}</p>{_back_link(token, lang)}", status=500, lang=lang)
         _record_report_request(token)
         notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email shortly." if lang == LANG_EN
                   else f"{label}レポートの送信を受け付けました。まもなくメールが届きます。")
@@ -1367,7 +1394,7 @@ def handler(event, context):
 
     if not TICKER_RE.match(ticker):
         msg = "Invalid ticker." if lang == LANG_EN else "無効なティッカーです。"
-        return _page(f"<p>{msg}</p>{_back_link(token)}", status=400)
+        return _page(f"<p>{msg}</p>{_back_link(token, lang)}", status=400, lang=lang)
 
     table = dynamodb.Table(WATCHLIST_TABLE)
 
