@@ -464,6 +464,43 @@ class TestDeliveryFrequencyWording:
         assert "短期" in body and "中期" in body and "長期" in body
 
 
+class TestWordingMatchesImplementation:
+    """利用者向けの説明文と実装の齟齬を防ぐ。数値・頻度・収集情報などの
+    「事実の主張」は、コード側の正本とズレると誤解や不信につながる。"""
+
+    def test_privacy_policy_lists_language_setting_as_collected(self, rh):
+        """_set_user_lang()がlangをapproved_tokensに保存しているため、
+        収集情報の列挙に含めないと「〜のみ」という記述が不正確になる"""
+        assert "表示言語" in rh.handler(_event(privacy="1"), None)["body"]
+        assert "display language" in rh.handler(
+            _event(_headers={"x-site-lang": "en"}, privacy="1"), None)["body"]
+
+    def test_info_page_does_not_claim_daily_delivery_for_short_mode(self, rh):
+        """EventBridgeのcronはMON-FRIのため、配信は平日のみ"""
+        body = rh.handler(_event(info="1"), None)["body"]
+        assert "短期=毎日" not in body
+        assert "短期=毎営業日" in body
+
+    def test_info_page_frequency_table_matches_send_freq_labels(self, rh):
+        """表の頻度ラベルは_SEND_FREQ_LABELが正本。本文と食い違わせない"""
+        body = rh.handler(_event(info="1"), None)["body"]
+        for label in ("毎日（平日）", "毎週月曜", "月初の月曜（月1回）"):
+            assert label in body
+
+    def test_info_page_thresholds_come_from_config(self, rh):
+        """足切り条件はconfig.pyの値をそのまま表示していること"""
+        from config import MAX_PEG, MIN_GROWTH
+        body = rh.handler(_event(info="1"), None)["body"]
+        assert f"{MIN_GROWTH * 100:.0f}%" in body
+        assert str(MAX_PEG) in body
+
+    def test_guide_peg_range_excludes_zero_and_negative(self, rh):
+        """ranking.pyはpeg > 0 かつ peg <= MAX_PEG。「3.0以下」だけでは
+        負値を含むように読めるため範囲で表記する"""
+        body = rh.handler(_event(guide="1"), None)["body"]
+        assert "PEGが0〜" in body
+
+
 class TestTickerRegistration:
     def test_register_valid_ticker(self, rh):
         r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)

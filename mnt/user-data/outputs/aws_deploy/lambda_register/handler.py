@@ -546,10 +546,10 @@ def _render_privacy(lang: str = LANG_JA) -> str:
     if lang == LANG_EN:
         return """
         <h3>Privacy Policy</h3>
-        <p>We collect only <strong>your email address, registered tickers, and time horizon
-        selection</strong>. We never collect payment details, your name or address, IP address
-        logs, or cookie-based tracking. We never share or sell your personal data to third
-        parties.</p>
+        <p>We collect only <strong>your email address, registered tickers, your time horizon
+        selection, your display language, and the timestamps of those settings</strong>. We never
+        collect payment details, your name or address, IP address logs, or cookie-based tracking.
+        We never share or sell your personal data to third parties.</p>
         <p>Data is stored in AWS's managed database (DynamoDB); nobody without your invite token
         can access it. That said, this is a personal project and has not undergone a large-scale
         security audit. No passwords or other sensitive credentials are required — your email
@@ -566,9 +566,10 @@ def _render_privacy(lang: str = LANG_JA) -> str:
         """
     return """
     <h3>プライバシーポリシー</h3>
-    <p>収集する情報は<strong>メールアドレス・登録銘柄・判定期間モードの選択のみ</strong>です。
-    クレジットカード等の決済情報、氏名・住所、IPアドレスのログ、Cookieによる行動追跡は
-    一切行っていません。第三者への個人情報の提供・販売もありません。</p>
+    <p>収集する情報は<strong>メールアドレス・登録銘柄・判定期間モードの選択・表示言語の設定と、
+    それらの設定日時のみ</strong>です。クレジットカード等の決済情報、氏名・住所、
+    IPアドレスのログ、Cookieによる行動追跡は一切行っていません。
+    第三者への個人情報の提供・販売もありません。</p>
     <p>データはAWSのマネージド型データベース(DynamoDB)に保管しており、招待トークンを
     知らない第三者はアクセスできません。ただし本サービスは個人開発のため、大規模な
     セキュリティ監査は実施していません。パスワード等の機密情報の入力は不要な設計に
@@ -943,15 +944,16 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
           <p class="muted">PEG, earnings growth, market cap, and price all come from
           <strong>Yahoo Finance (the yfinance library)</strong>. PEG is "P/E ratio ÷ earnings
           growth rate" — lower means more undervalued relative to growth. We don't recalculate it
-          ourselves. Send frequency depends on the mode (short-term = daily, mid-term = every
-          Monday, long-term = first Monday of the month).</p>
+          ourselves. Send frequency depends on the mode (short-term = every trading day,
+          mid-term = every Monday, long-term = first Monday of the month).</p>
           <p class="muted">Delivery timing: before the US market opens (6:00am US Eastern Time),
           using data through the previous trading day. On Mondays, since no new trading data
           exists over the weekend, this naturally becomes data through the prior Friday.</p>
         </details>
 
         <details>
-          <summary>📊 Monitoring report — daily trend/momentum/volume checks on your watchlist</summary>
+          <summary>📊 Monitoring report — trend/momentum/volume checks on your watchlist,
+          every trading day</summary>
           <p><strong>Trend</strong> lights up when either of these happens:
           a <strong>cross</strong> (the short moving average crosses above/below the long one
           "on that day"), or <strong>alignment</strong> (price and each moving average line up
@@ -1011,7 +1013,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
       <p class="muted">PEG・利益成長率・時価総額・株価は<strong>Yahoo Finance
       （yfinanceライブラリ）</strong>から取得。PEGは「株価収益率(PER) ÷ 利益成長率」で、
       低いほど成長性に対して割安とされる指標です。当サービスでの再計算はしていません。
-      発行頻度はモードによって異なります（短期=毎日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
+      発行頻度はモードによって異なります（短期=毎営業日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
       <p class="muted">配信タイミング: 米国市場が開く前（米東部時間 朝6:00、日本時間では
       夏時間中は夜19:00頃・冬時間中は夜20:00頃）に、直前の取引日までのデータで配信します。
       週明け分は、週末に新しい取引データが存在しないため、自動的に前週金曜までのデータに
@@ -1019,7 +1021,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     </details>
 
     <details>
-      <summary>📊 監視レポート — 登録銘柄のトレンド・モメンタム・出来高を毎日判定</summary>
+      <summary>📊 監視レポート — 登録銘柄のトレンド・モメンタム・出来高を毎営業日判定</summary>
       <p><strong>トレンド</strong>は次のどちらかが成立すると点灯します:
       <strong>クロス</strong>（短い移動平均線が長い方を「その日に」上抜け／下抜け）、
       または<strong>並び順</strong>（株価・各移動平均線が上から順にきれいに並んでいる状態）。

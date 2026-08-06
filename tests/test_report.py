@@ -26,6 +26,39 @@ def test_selection_report_footer_link_has_no_query_ampersand():
     assert 'href="https://pegsignal.com/?token=tok123"' in body
 
 
+def _monitoring_body(mode):
+    results = [{"ticker": "NVDA", "price": 100.0, "prev_close": 98.0,
+                "signals": {"buy_trend": True, "volume_ratio": 1.8, "volume_high": True},
+                "peg": 1.2}]
+    return build_monitoring_report(results, mode, None, "https://pegsignal.com/", "tok123")
+
+
+def test_monitoring_report_volume_baseline_matches_mode():
+    """出来高の基準日数はモードごとに違う(短期・中期=20日、長期=50日)。
+    以前は「20日平均比」と決め打ちで、長期モードだけ実際の計算とズレていた。"""
+    assert "20日平均比" in _monitoring_body("SHORT")
+    assert "20日平均比" in _monitoring_body("MID")
+    assert "50日平均比" in _monitoring_body("LONG")
+
+
+def test_monitoring_report_volume_baseline_is_english_and_mode_aware():
+    assert "20-day average" in _monitoring_body_en("MID")
+    assert "50-day average" in _monitoring_body_en("LONG")
+
+
+def _monitoring_body_en(mode):
+    results = [{"ticker": "NVDA", "price": 100.0, "prev_close": 98.0,
+                "signals": {"buy_trend": True, "volume_ratio": 1.8, "volume_high": True},
+                "peg": 1.2}]
+    return build_monitoring_report(results, mode, None, "https://pegsignal.com/", "tok123",
+                                   lang="en")
+
+
+def test_monitoring_report_volume_baseline_falls_back_when_mode_missing():
+    """モード未指定でも既定(中期)の日数を出し、KeyErrorで落ちないこと"""
+    assert "20日平均比" in _monitoring_body("")
+
+
 def test_selection_report_links_to_usage_guide():
     ranked = [{"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2, "earnings_growth": 0.25}]
     signals_map = {"NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False}}

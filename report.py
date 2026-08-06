@@ -340,6 +340,12 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
     else:
         summary = f"登録{len(watchlist_results)}銘柄中、買いシグナル増加は{len(increased)}件、警告は{len(warnings)}件です。"
 
+    # 出来高の基準日数はモードごとに違う(短期・中期=20日、長期=50日)。
+    # 以前は「20日平均比」と決め打ちしていたため、長期モードでは実際の計算
+    # (volume_lookback=50)と表示がずれていた。config.pyの値を正本にする。
+    volume_baseline_days = PERIOD_PRESETS.get(mode, {}).get("volume_lookback") or \
+        PERIOD_PRESETS["MID"]["volume_lookback"]
+
     blocks = []
     for r in watchlist_results:
         sig = r["signals"]
@@ -354,13 +360,16 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
         sep = ", " if lang == LANG_EN else "・"
         warn_text = sep.join(warn_items) if warn_items else t("no_warnings", lang)
 
+        volume_state = t("volume_high", lang) if sig.get("volume_high") else t("volume_normal", lang)
         if lang == LANG_EN:
             title = f"{r['ticker']}: ${r['price']:.2f} ({change_pct:+.1f}% vs prev close)"
-            volume_line = f"Volume: {t('volume_high', lang) if sig.get('volume_high') else t('volume_normal', lang)} ({sig.get('volume_ratio')}x 20-day average)"
+            volume_line = (f"Volume: {volume_state} "
+                           f"({sig.get('volume_ratio')}x the {volume_baseline_days}-day average)")
             warn_line = f"Warnings: {warn_text}"
         else:
             title = f"【{r['ticker']}】${r['price']:.2f}（前日比 {change_pct:+.1f}%）"
-            volume_line = f"出来高: {t('volume_high', lang) if sig.get('volume_high') else t('volume_normal', lang)}（20日平均比{sig.get('volume_ratio')}倍）"
+            volume_line = (f"出来高: {volume_state}"
+                           f"（{volume_baseline_days}日平均比{sig.get('volume_ratio')}倍）")
             warn_line = f"警告: {warn_text}"
 
         blocks.append(f"""
