@@ -3,9 +3,11 @@ landing-preview Lambda ハンドラ
 
 メールアドレスを登録したくない訪問者にも継続的な価値を提供するため、短期・中期・
 長期の選定レポートをその場でウェブページとして閲覧できるようにする「読み取り専用の
-ランディングページ」。register-stockとは別のLambda・別のFunction URLとして
-デプロイし、本番(register-stock)には一切手を加えない(2026-08-06、独立したテスト
-展開として追加)。
+ランディングページ」。メール配信機能への誘導はあくまで補助的な位置づけであり、
+このウェブページ自体を独立したメイン機能として設計する(2026-08-06、ユーザーからの
+フィードバックにより、導入文でメール機能に触れる書き方から修正)。register-stockとは
+別のLambda・別のFunction URLとしてデプロイし、本番(register-stock)には一切手を
+加えない(独立したテスト展開として追加)。
 
 設計上の要点:
 - **読み取り専用**。daily-batchが計算し正本を保有するselection_snapshot
@@ -17,9 +19,15 @@ landing-preview Lambda ハンドラ
   検索botはJSを実行しないため、動的な出し分けだとインデックスされない。
   ページ上部の「短期/中期/長期」リンクはページ内アンカー(#short等)で、
   クリックしなくても3モード分の内容はすべてHTML上に存在する
-- **申込みフォームはこのLambdaでは処理しない**。フォームのaction属性を
-  register-stockの本番URLに向けて送信するだけで、実際の登録処理・
-  ダブルオプトイン等のロジックは一切複製しない(単一の正本を保つため)
+- **メール登録の案内はページ下部のみ**。導入部(_intro_html)ではメール配信機能に
+  一切触れず、このページ自体の価値を先に伝える。個別銘柄の監視・メール受信を
+  望む場合の案内は_signup_pitch_html()としてページ下部にのみ置く
+- **申込みフォームはこのLambdaでは処理しない**。本番register-stockの申込み
+  ページへの単純なリンクを置くだけで、実際の登録処理・ダブルオプトイン等の
+  ロジックは一切複製しない(単一の正本を保つため)
+- **「割安」等の価値判断を示す表現を避ける**。PEGレシオという客観的な指標に
+  基づく機械的な選定であることが伝わるよう、「PEGレシオが低い」という表現に
+  統一する(金商法(投資助言業)リスク低減の方針、TODO.md参照)
 """
 import html
 import os
@@ -99,19 +107,22 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
 
 
 def _intro_html(lang: str) -> str:
+    """このページ自体がメイン機能の1つであるため、メール配信機能への言及は
+    意図的に冒頭に置かない(2026-08-06、ユーザーからのフィードバックで修正)。
+    メール登録の案内は_signup_pitch_html()としてページ下部にのみ置く。"""
     if lang == LANG_EN:
         return """
-        <p class="eyebrow">PegSignal (free, indie-built) — preview, no sign-up required</p>
-        <h1>Today's undervalued NASDAQ100 growth stocks</h1>
-        <p>This page shows the same PEG-ranked screening results we email out, for all three
-        time horizons, without requiring an email address. Pick a horizon below or just
-        scroll through all three.</p>
+        <p class="eyebrow">PegSignal (free, indie-built)</p>
+        <h1>Today's PEG screening results (NASDAQ100)</h1>
+        <p>We rank NASDAQ100 growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
+        across three time horizons — short, mid, and long-term. Pick a horizon below, or
+        just scroll through all three.</p>
         """
     return """
-    <p class="eyebrow">PegSignal（無料・個人開発）— プレビュー・登録不要</p>
-    <h1>今日の割安な成長株（NASDAQ100）</h1>
-    <p>メール配信しているものと同じPEGランキングの選定結果を、短期・中期・長期の
-    3モード分すべて、メールアドレス登録なしでこの場で確認できます。
+    <p class="eyebrow">PegSignal（無料・個人開発）</p>
+    <h1>今日のPEGスクリーニング結果（NASDAQ100）</h1>
+    <p>NASDAQ100構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
+    短期・中期・長期の3つの判定期間でランキングしています。
     下のリンクで見たいモードへ移動するか、そのまま3モード分をご覧ください。</p>
     """
 
@@ -181,8 +192,8 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
 
 
 def _page(inner_html: str, lang: str, status: int = 200) -> dict:
-    title = ("PegSignal preview — today's NASDAQ100 growth-stock picks, no sign-up"
-             if lang == LANG_EN else "PegSignalプレビュー — 登録不要で見る今日の成長株選定")
+    title = ("PegSignal — Today's NASDAQ100 PEG screening results"
+             if lang == LANG_EN else "PegSignal — 今日のNASDAQ100 PEGスクリーニング結果")
     footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
     body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">

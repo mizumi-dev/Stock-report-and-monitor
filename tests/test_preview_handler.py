@@ -153,6 +153,47 @@ class TestPreviewLanguage:
         assert not re.search(r"[ぁ-んァ-ン一-龥]", visible)
 
 
+class TestPreviewIntroWording:
+    """導入部(_intro_html)ではメール配信機能に一切触れない(2026-08-06、
+    ユーザーからのフィードバックにより修正)。メール登録の案内はページ下部の
+    _signup_pitch_html()にのみ置く。"""
+
+    def test_intro_does_not_mention_email_in_japanese(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        intro = body.split('<h2 id="short"')[0]
+        assert "メール" not in intro
+
+    def test_intro_does_not_mention_email_in_english(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        intro = body.split('<h2 id="short"')[0]
+        assert "email" not in intro.lower()
+
+    def test_email_pitch_still_present_further_down_the_page(self, ph):
+        """メール機能への言及自体を削除したわけではなく、位置を下部に移しただけ"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert "メール" in body
+
+    def test_page_avoids_value_judgment_wording(self, ph):
+        """「割安」等の価値判断を示す表現は使わず、PEGレシオという客観的指標に
+        基づく機械的な選定であることを一貫させる(金商法リスク低減の方針)"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert "割安" not in body
+
+    def test_english_page_avoids_value_judgment_wording(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert "undervalued" not in body.lower()
+        assert "cheap" not in body.lower()
+
+
 class TestPreviewReadOnly:
     """このLambdaは読み取り専用であることが設計上の要件(CLAUDE.mdの
     「バッチが計算し正本を保有、ボタン押下は読み取り専用」の原則をこの新画面にも適用)。

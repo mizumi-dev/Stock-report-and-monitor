@@ -56,19 +56,19 @@ T = {
         LANG_JA: (
             "シグナルの見方: 「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
             "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
-            "この選定は<strong>PEG(株価に対する利益成長率の割安度)を基準にランキング</strong>したもので、"
+            "この選定は<strong>PEG(株価収益率÷利益成長率)を基準にランキング</strong>したもので、"
             "シグナルは現在の値動きの状態を補足する参考情報です。"
-            "トレンドが既に下向き(デッドクロス)の銘柄は、割安に見えても値動きが弱い可能性があるため"
+            "トレンドが既に下向き(デッドクロス)の銘柄は、PEGが低くても値動きが弱い可能性があるため"
             "注意してください。"
         ),
         LANG_EN: (
             "How to read the signals: \"Trend\" is a golden/dead cross (moving average crossover), "
             "\"Momentum\" is RSI (overbought/oversold), and \"Volume\" compares against the normal "
             "baseline. This selection is <strong>ranked by PEG ratio</strong> "
-            "(how undervalued the price is relative to earnings growth) — the signals are just "
+            "(P/E ratio ÷ earnings growth rate) — the signals are just "
             "supplementary information about current price action. "
-            "A stock with an already-declining trend (dead cross) may be weak even if it looks "
-            "cheap, so please keep that in mind."
+            "A stock with an already-declining trend (dead cross) may be weak even with a low "
+            "PEG, so please keep that in mind."
         ),
     },
 }
