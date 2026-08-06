@@ -1181,7 +1181,7 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p>A stock can have a high price tag and still be reasonable <em>if</em> the company is
         growing fast. PEG captures exactly that: it divides how expensive the stock looks by how
         fast profits are growing. <strong>A lower PEG means you're paying less for each unit of
-        growth.</strong> We only include stocks with a PEG of {MAX_PEG} or below and earnings
+        growth.</strong> We only include stocks with a PEG between 0 and {MAX_PEG}, and earnings
         growth of {MIN_GROWTH * 100:.0f}% or more.</p>
 
         <h4>4. Reading the signal lamps</h4>
@@ -1273,7 +1273,7 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p>株価が高くても、その会社が急成長しているなら「妥当」かもしれません。PEGは
     まさにそれを測る指標で、<strong>株価の割高さを、利益の成長の速さで割った値</strong>
     です。<strong>PEGが小さいほど、成長のわりに安く買える</strong>ことを意味します。
-    本サービスでは、PEGが{MAX_PEG}以下かつ利益成長率が{MIN_GROWTH * 100:.0f}%以上の
+    本サービスでは、PEGが0〜{MAX_PEG}の範囲かつ利益成長率が{MIN_GROWTH * 100:.0f}%以上の
     銘柄だけを対象にしています。</p>
 
     <h4>4. シグナルのランプの見方</h4>
