@@ -30,7 +30,6 @@ T = {
         ),
     },
     "summary_label": {LANG_JA: "🔎 サマリー", LANG_EN: "🔎 Summary"},
-    "selection_heading": {LANG_JA: "📈 今週のPEGスクリーニング結果", LANG_EN: "📈 This week's PEG screening results"},
     "monitoring_heading": {LANG_JA: "📊 本日の監視レポート", LANG_EN: "📊 Today's monitoring report"},
     "no_candidates": {LANG_JA: "本日、足切り条件を通過した銘柄はありませんでした。",
                        LANG_EN: "No stocks passed the screening criteria today."},
@@ -101,6 +100,22 @@ def _mode_note(mode: str, lang: str) -> str:
         return ""
     text = f"Time horizon: {label}" if lang == LANG_EN else f"判定期間: {label}モード"
     return f'<p style="color:#888;font-size:12px;">{text}</p>'
+
+
+# 選定レポートの見出し・件名は、判定期間モードに応じて「本日の/今週の/今月の」を
+# 出し分ける(モード未指定時はMID相当の「今週の」をデフォルトとする)。
+_SELECTION_PERIOD_PHRASE = {
+    "SHORT": {LANG_JA: "本日の", LANG_EN: "Today's"},
+    "MID": {LANG_JA: "今週の", LANG_EN: "This week's"},
+    "LONG": {LANG_JA: "今月の", LANG_EN: "This month's"},
+}
+
+
+def selection_subject(mode: str, lang: str) -> str:
+    phrase = _SELECTION_PERIOD_PHRASE.get(mode, _SELECTION_PERIOD_PHRASE["MID"])[lang]
+    if lang == LANG_EN:
+        return f"📈 {phrase} PEG screening results"
+    return f"📈 {phrase}PEGスクリーニング結果"
 
 
 def _signal_dot(flag: bool, on_emoji: str) -> str:
@@ -259,7 +274,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
 
     return f"""
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
-      <h2>{t('selection_heading', lang)}</h2>
+      <h2>{selection_subject(mode, lang)}</h2>
       {_mode_note(mode, lang)}
       {body_rows}
       <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
