@@ -1,0 +1,51 @@
+name: deploy
+
+# testsワークフロー(tests.yml)がmaster上で成功した直後にのみ発火する。
+# push/pull_requestで直接トリガーすると、tests.ymlのpytestジョブと二重実行に
+# なってしまうため、workflow_run経由でテスト成功を前提条件にしている。
+on:
+  workflow_run:
+    workflows: ["tests"]
+    branches: [master]
+    types: [completed]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+    steps:
+      # workflow_runはトリガー元のコミットを自動チェックアウトしないため、
+      # tests.ymlが実際にテストしたコミット(head_sha)を明示的に指定する
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::140943195945:role/github-actions-deploy-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build daily-batch zip
+        run: zip daily_batch.zip handler.py config.py signals.py data_sources.py ranking.py report.py
+
+      - name: Build register-stock zip
+        run: |
+          (cd mnt/user-data/outputs/aws_deploy/lambda_register && zip "$OLDPWD/register.zip" handler.py)
+          zip -j register.zip config.py
+
+      - name: Deploy daily-batch
+        run: |
+          aws lambda update-function-code --function-name daily-batch \
+            --zip-file fileb://daily_batch.zip --region "$AWS_REGION"
+
+      - name: Deploy register-stock
+        run: |
+          aws lambda update-function-code --function-name register-stock \
+            --zip-file fileb://register.zip --region "$AWS_REGION"
