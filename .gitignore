@@ -2,3 +2,10 @@ __pycache__/
 *.pyc
 daily_batch_new.zip
 *.zip
+
+# 内部作業メモ・認証情報等、コミットしてはいけない一時ファイル用の命名規則。
+# 過去にaws_remediation.mdへAWSアクセスキーを誤ってコミットした反省を踏まえて追加
+*.local.md
+.env
+.env.*
+*credentials*
