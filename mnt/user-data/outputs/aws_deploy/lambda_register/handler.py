@@ -1602,23 +1602,58 @@ def _classify_route(params: dict) -> str:
     return "main_form"
 
 
-def _access_log_fields(event: dict) -> tuple[str, str]:
-    """ボットと人間を見分けるための最小限の付加情報。IPアドレスは含めない
+# 既知のbot/スキャナー/クローラーのUser-Agent断片。ここに載っている文字列を
+# 含むUAは"[ACCESS] ... bot=True"としてログに残し、CloudWatch Logs Insightsで
+# 「実際の人間らしいアクセス」を都度手作業で絞り込まずに済むようにする
+# (2026-08-06、流入分析で毎回同じ除外作業をしていたことから追加)。
+_BOT_UA_SUBSTRINGS = (
+    "bot", "spider", "crawl", "scan", "curl/", "wget/", "python-requests",
+    "go-http-client", "scrapy", "java/", "libwww", "httpclient", "okhttp",
+    "postman", "insomnia", "sniffer", "nmap", "nikto", "masscan", "zgrab",
+)
+# real_form_ja/enは_classify_route()が実際に応答する既知パス。それ以外への
+# アクセスは、UAを詐称していても「そもそも存在しないURLを叩いている」時点で
+# botとみなせる(典型的な脆弱性スキャン挙動)
+_KNOWN_PATHS = {"/", "/favicon.ico"}
+
+
+def _is_probable_bot(user_agent: str, path: str) -> bool:
+    ua_lower = user_agent.lower()
+    if any(s in ua_lower for s in _BOT_UA_SUBSTRINGS):
+        return True
+    if path not in _KNOWN_PATHS:
+        return True
+    return False
+
+
+def _access_log_fields(event: dict) -> tuple[str, str, str, str]:
+    """流入分析用の最小限の付加情報。IPアドレスは含めない
     (プライバシーポリシーに明記の通り)。パスは、クエリ文字列だけを見る
     _classify_route()では判別できない「そもそも存在しないパスを叩いている
     (典型的なボットの脆弱性スキャン挙動)」ケースを見分けるために必要。
-    User-Agentはブラウザ種別を示す一般的なサーバーログ項目で、個人特定情報ではない。"""
+    User-Agentはブラウザ種別を示す一般的なサーバーログ項目で、個人特定情報ではない。
+    RefererはURLのみ(どのページ・サイトから来たか)で、個人を特定する情報は
+    含まない。値はそのまま外部から送られてくるため、ログの行崩れを防ぐ目的で
+    改行を除去したうえで長さを制限する。"""
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
     headers = event.get("headers") or {}
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
-    return path, user_agent
+    referer_raw = headers.get("referer") or headers.get("Referer") or ""
+    referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
+    return path, user_agent, referer, ("true" if _is_probable_bot(user_agent, path) else "false")
 
 
 def handler(event, context):
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
-    path, user_agent = _access_log_fields(event)
-    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)} path={path!r} ua={user_agent!r}")
+    path, user_agent, referer, is_bot = _access_log_fields(event)
+    # 告知文への?src=をそのまま流入元ラベルとして記録する(例: ?src=twitter,
+    # ?src=guide_email)。任意の英数字・アンダースコア・ハイフンのみ許可し、
+    # 自由記述にしない(ログの行崩れ・検索性低下を防ぐため)。
+    src_raw = (params.get("src") or "").strip()
+    src = src_raw if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", src_raw) else ""
+    print(f"[ACCESS] route={_classify_route(params)} has_token={bool(token)} "
+          f"bot={is_bot} src={src!r} referer={referer!r} path={path!r} ua={user_agent!r}")
 
     # 英語版(en.pegsignal.com)対応。トークンが登録済みならその利用者が保存した言語を
     # 優先し(どちらのドメインから来ても本人の設定が優先される)、未登録の新規訪問者は

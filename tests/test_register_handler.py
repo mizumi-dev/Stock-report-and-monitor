@@ -786,6 +786,49 @@ class TestAccessLogging:
         assert "path='/wp-login.php'" in out  # pathを見ればボットだとわかる
         assert "ua='python-requests/2.31'" in out
 
+    # ===== 流入分析用のログ拡張(2026-08-06) =====
+    # IPアドレスは記録しない方針を維持しつつ、リファラ・bot判定・流入元(?src=)を
+    # [ACCESS]行に追加した。以前は上のtest_logs_reveal_bot_hitting_nonexistent_pathの
+    # ようにpath/uaを見て人間が都度判断する必要があったが、bot=true/falseとして
+    # 機械的に判定できるようにした。
+
+    def test_access_log_includes_referer(self, rh, capsys):
+        rh.handler(_event(_headers={"referer": "https://twitter.com/foo"}), None)
+        assert "referer='https://twitter.com/foo'" in capsys.readouterr().out
+
+    def test_access_log_flags_known_bot_user_agent(self, rh, capsys):
+        rh.handler(_event(_headers={"user-agent": "curl/8.7.1"}), None)
+        assert "bot=true" in capsys.readouterr().out
+
+    def test_access_log_flags_unknown_path_as_bot_even_with_browser_ua(self, rh, capsys):
+        """UAを詐称していても、実在しないパスへのアクセスはbot扱いにする"""
+        event = _event(_headers={"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        event["rawPath"] = "/wp-admin/install.php"
+        rh.handler(event, None)
+        assert "bot=true" in capsys.readouterr().out
+
+    def test_access_log_does_not_flag_normal_browser_visit(self, rh, capsys):
+        event = _event(_headers={"user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+        event["rawPath"] = "/"
+        rh.handler(event, None)
+        assert "bot=false" in capsys.readouterr().out
+
+    def test_access_log_captures_valid_src_param(self, rh, capsys):
+        rh.handler(_event(src="twitter_launch"), None)
+        assert "src='twitter_launch'" in capsys.readouterr().out
+
+    def test_access_log_rejects_free_text_src_param(self, rh, capsys):
+        """srcは英数字・_・-のみ許可。ログの行崩れ・任意文字列注入を防ぐ"""
+        rh.handler(_event(src="evil\nvalue with spaces"), None)
+        assert "src=''" in capsys.readouterr().out
+
+    def test_access_log_does_not_include_ip_address(self, rh, capsys):
+        """プライバシーポリシー通り、IPアドレスは記録しない"""
+        event = _event()
+        event["requestContext"] = {"http": {"sourceIp": "203.0.113.5"}}
+        rh.handler(event, None)
+        assert "203.0.113.5" not in capsys.readouterr().out
+
     def test_logs_default_path_when_missing_from_event(self, rh, capsys):
         rh.handler(_event(token=VALID_TOKEN), None)
         out = capsys.readouterr().out
