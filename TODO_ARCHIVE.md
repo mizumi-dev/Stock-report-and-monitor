@@ -5,6 +5,52 @@
 
 最終更新: 2026-08-06
 
+## メール配信をSESからResendへ乗り換え（2026-08-06、完了）
+
+SESの本番アクセス審査が、us-east-1(2回却下)・大阪ap-northeast-3(正しい情報で
+申請したが数秒で即時DENIED)のどちらでも通らず、**AWSアカウント単位で何らかの
+自動判定フラグが立っている可能性が高い**と判断。「外部依存を増やしたくない」
+という以前の方針(下記【最優先】SES本番アクセス再却下への対応、参照)を見直し、
+Resend(https://resend.com)への乗り換えを決定・完了した。
+
+- 共有モジュール`mailer.py`を新設。boto3のSESクライアントと同じ
+  `send_email(Source=,Destination=,Message=,ReplyToAddresses=)`という
+  キーワード引数インターフェースを持つ`ResendMailer`を実装し、`daily-batch`・
+  `register-stock`両方の呼び出し箇所(計5箇所)は無変更で乗り換え完了
+  (`ses = ResendMailer()`に差し替えるだけで済んだ)
+- `deploy.sh`・`.github/workflows/deploy.yml`の両方で`mailer.py`をzipに
+  含めるよう修正。`SES_REGION`(乗り換え検討時に追加したものの結局不要になった
+  環境変数)を削除し`RESEND_API_KEY`に置き換え。Lambda実行ロールの
+  `ses:SendEmail`権限も不要になったため削除
+- 実地テスト(`_test_trigger_failure`ペイロードでdaily-batchを起動)で、
+  Resend側のCloudflareボット対策によりPython urllibの既定User-Agentが
+  ブロックされる問題(HTTP 403, error code 1010)を発見・修正(明示的な
+  `User-Agent`ヘッダーを付与、PR #26)
+- Resendアカウント作成・`pegsignal.com`ドメインのDKIM(TXT)・SPF/送信用(MX・TXT)
+  レコードをRoute53に追加してドメイン検証完了、`RESEND_API_KEY`を両Lambdaの
+  環境変数にAWSコンソールから直接設定、実地確認(失敗通知メールが実際に届く
+  ことを確認)まで全て完了
+- テスト追加(`tests/test_mailer.py`)、pytest全件pass
+- 大阪リージョンで進めていたSESの申請(ケースID: 178602306000835)は保留のまま
+  でよいと判断(Resendへの乗り換えが完了したため、SES側の結果を待つ必要性が
+  無くなった)
+
+## 【最優先】SES本番アクセス再却下への対応（2026-08-04、Resendへの乗り換えで解消）
+
+2回目の却下(具体的理由なしの定型文)を受けて対応を続けたが、`WebsiteURL`修正
+(却下後はAPIロックされ不可、AWSサポートへの人力修正依頼も未解決)・SPF/DMARC
+レコード追加・Service Quotas経由の別ルート試行・リージョン変更(大阪)による
+再申請、いずれも解決に至らず、最終的にはAWSアカウント単位の自動判定フラグが
+原因と判断。上記の通りResendへの乗り換えで解決した。
+
+- `sesv2 put-account-details`直接修正は却下後`ConflictException`でロック
+- `pegsignal.com`にSPF・DMARCレコードを追加(SPF: `v=spf1 include:amazonses.com ~all`、
+  DMARC: `v=DMARC1; p=none; rua=mailto:amsllr759@gmail.com`)
+- AWS Service Quotasから「SES Daily Sending Quota」引き上げを直接リクエストする
+  代替ルートも試したが、結果は`CASE_CLOSED`(未承認)
+- 大阪(ap-northeast-3、履歴のないクリーンなリージョン)で正しい情報を用いて
+  再申請したが、数秒で即時DENIED(ケースID: 178602306000835、保留中)
+
 ## en.pegsignal.comインフラの実デプロイ（2026-08-06）
 
 英語版サイトの残件だった、コード用意済み・未実行のインフラスクリプト2本を実行した。
