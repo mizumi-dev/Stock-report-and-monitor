@@ -33,7 +33,7 @@ from config import (
 from data_sources import get_nasdaq100_tickers, get_stock_data
 from signals import calc_all_signals
 from ranking import rank_stocks
-from report import build_selection_report, build_monitoring_report
+from report import build_selection_report, build_monitoring_report, selection_subject
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 SIGNAL_HISTORY_TABLE = os.environ.get("SIGNAL_HISTORY_TABLE", "signal_history")
@@ -263,7 +263,7 @@ def run_selection_reports(users: list[dict]):
             lang = u.get("lang") or "ja"
             body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode,
                                           lang=lang, as_of=_today_str())
-            subject = "📈 This week's PEG screening results" if lang == "en" else "📈 今週のPEGスクリーニング結果"
+            subject = selection_subject(mode, lang)
             send_email(subject, body, u["email"])
 
 
@@ -282,7 +282,7 @@ def send_selection_report_now(user: dict):
 
     lang = user.get("lang") or "ja"
     body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang, as_of=as_of)
-    subject = "📈 This week's PEG screening results" if lang == "en" else "📈 今週のPEGスクリーニング結果"
+    subject = selection_subject(mode, lang)
     send_email(subject, body, user["email"])
 
 
