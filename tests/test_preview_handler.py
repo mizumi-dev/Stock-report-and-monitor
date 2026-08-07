@@ -352,6 +352,35 @@ class TestPreviewIntroWording:
         assert "cheap" not in body.lower()
 
 
+class TestPreviewGuideLink:
+    """使い方ガイドへのリンクは当初ページ最下部のsignup pitch内にしか無く、
+    先にランキングの読み方を知りたい訪問者が発見しづらかった。冒頭の
+    trust-lineの直後に移動し、下部の重複は削除する(2026-08-07追加)。"""
+
+    def test_guide_link_appears_before_the_rankings(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert body.index("使い方ガイドを見る") < body.index('<h2 id="short"')
+
+    def test_guide_link_points_to_register_url_with_guide_param(self, ph):
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert f'href="{ph.REGISTER_URL}?guide=1"' in body
+
+    def test_guide_link_not_duplicated_at_bottom(self, ph):
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert body.count("guide=1") == 1
+
+    def test_english_guide_link_appears_before_the_rankings(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert body.index("See how it works") < body.index('<h2 id="short"')
+        assert f'href="{ph.REGISTER_URL}?guide=1&amp;lang=en"' in body
+
+
 class TestPreviewDisclaimer:
     """このページは登録不要で誰でも読める「サービスの顔」であり、銘柄ランキングを
     そのまま公開表示する。メール本文(build_selection_report)には免責があるが、
