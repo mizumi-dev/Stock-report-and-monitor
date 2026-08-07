@@ -464,6 +464,16 @@ def _dispatch(event: dict) -> dict:
     if event.get("_test_fetch_timing"):
         return _diagnose_fetch_timing(event.get("_test_fetch_timing_n", 20))
 
+    # TODO#8診断: S&P500構成銘柄取得(Wikipediaパース)が実際に機能するかの検証用。
+    # サンドボックス開発環境からはWikipediaへの通信もブロックされているため、
+    # 実際に外部通信できるdaily-batch-dev上でのみ検証できる。読み取りのみ。
+    if event.get("_test_fetch_sp500"):
+        from data_sources import get_sp500_tickers
+        tickers = get_sp500_tickers()
+        return {"statusCode": 200, "body": {
+            "count": len(tickers), "sample": tickers[:10], "has_dup": len(tickers) != len(set(tickers)),
+        }}
+
     owner_token = event.get("owner_token")
 
     # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ、保存済み

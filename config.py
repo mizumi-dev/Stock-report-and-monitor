@@ -21,6 +21,26 @@ NASDAQ100_CACHE_KEY = "nasdaq100_tickers_cache"
 # 全並列ではなくI/O待ち解消に十分な程度に抑える
 FETCH_MAX_WORKERS = 10
 
+# ===== 銘柄ユニバース(対象指数) =====
+# 期間モードと同じ仕組み(app_settingsテーブル + このプリセット辞書)で
+# 利用者ごとに切り替え可能にする(2026-08-07、S&P500追加着手時に新設)。
+# NASDAQ100が既定・唯一の対象だった時期のcache_keyとの後方互換のため、
+# NASDAQ100_CACHE_KEYは従来通りモジュールレベル定数としても残す
+UNIVERSES = {
+    "NASDAQ100": {
+        "label": "NASDAQ100",
+        "label_en": "NASDAQ100",
+        "cache_key": NASDAQ100_CACHE_KEY,
+    },
+    "SP500": {
+        "label": "S&P500",
+        "label_en": "S&P 500",
+        "cache_key": "sp500_tickers_cache",
+    },
+}
+DEFAULT_UNIVERSE = "NASDAQ100"
+UNIVERSE_KEY = "universe"
+
 # ===== トレンド判定の方式 =====
 # "MA"(移動平均線) または "MACD"。現在はMAのみ運用。
 MA_OR_MACD = "MA"
@@ -118,16 +138,48 @@ def user_period_mode_key(owner_token: str) -> str:
     return f"{owner_token}#{PERIOD_MODE_KEY}"
 
 
-def signal_history_date_key(date_str: str, mode: str) -> str:
-    """signal_historyのdate(RANGE key)に期間モードも埋め込む。
-    RSI/トレンドはモードで値が変わるため、モードごとに別キャッシュにする必要がある
-    (ただし利用者ごとではなく、モードが同じ利用者同士で共有できる)。"""
-    return f"{date_str}#{normalize_mode(mode)}"
+def normalize_universe(universe: str | None) -> str:
+    u = (universe or "").upper()
+    return u if u in UNIVERSES else DEFAULT_UNIVERSE
 
 
-def selection_snapshot_key(mode: str) -> str:
+def get_universe_preset(universe: str | None) -> dict:
+    """ユニバース名からプリセットを返す。未知の値は既定ユニバースにフォールバックする"""
+    return UNIVERSES.get((universe or "").upper(), UNIVERSES[DEFAULT_UNIVERSE])
+
+
+def universe_cache_key(universe: str | None) -> str:
+    """app_settingsに構成銘柄一覧をキャッシュする際のキー。ユニバースごとに別キー"""
+    return get_universe_preset(universe)["cache_key"]
+
+
+def user_universe_key(owner_token: str) -> str:
+    """app_settingsテーブルで利用者ごとのユニバース選択を保存する際のキー
+    (user_period_mode_keyと同じ仕組み)。"""
+    return f"{owner_token}#{UNIVERSE_KEY}"
+
+
+def signal_history_date_key(date_str: str, mode: str, universe: str | None = None) -> str:
+    """signal_historyのdate(RANGE key)に期間モード・ユニバースも埋め込む。
+    RSI/トレンドはモード・ユニバースで値が変わるため、組み合わせごとに別キャッシュに
+    する必要がある(ただし利用者ごとではなく、同じ組み合わせの利用者同士で共有できる)。
+    既定ユニバース(NASDAQ100)は既存データとの後方互換のためサフィックスを付けない。"""
+    key = f"{date_str}#{normalize_mode(mode)}"
+    universe = normalize_universe(universe)
+    if universe != DEFAULT_UNIVERSE:
+        key += f"#{universe}"
+    return key
+
+
+def selection_snapshot_key(mode: str, universe: str | None = None) -> str:
     """app_settingsに選定レポートのスナップショット(ランキング+シグナル)を
-    モードごとに保存する際のキー。レポート即時発行ボタンはこのスナップショットを
-    読むだけで、新規スキャンは行わない(利用者間で共有する定時実行結果と常に一致させ、
-    ボタン連打によるコスト増・シグナル履歴汚染を防ぐため)。"""
-    return f"selection_snapshot#{normalize_mode(mode)}"
+    モード・ユニバースごとに保存する際のキー。レポート即時発行ボタンはこの
+    スナップショットを読むだけで、新規スキャンは行わない(利用者間で共有する
+    定時実行結果と常に一致させ、ボタン連打によるコスト増・シグナル履歴汚染を
+    防ぐため)。既定ユニバース(NASDAQ100)は既存データとの後方互換のため
+    サフィックスを付けない。"""
+    key = f"selection_snapshot#{normalize_mode(mode)}"
+    universe = normalize_universe(universe)
+    if universe != DEFAULT_UNIVERSE:
+        key += f"#{universe}"
+    return key
