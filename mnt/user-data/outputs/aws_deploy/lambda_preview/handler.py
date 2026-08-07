@@ -35,6 +35,12 @@ landing-preview Lambda ハンドラ
 - **「割安」等の価値判断を示す表現を避ける**。PEGレシオという客観的な指標に
   基づく機械的な選定であることが伝わるよう、「PEGレシオが低い」という表現に
   統一する(金商法(投資助言業)リスク低減の方針、TODO.md参照)
+- **対象指数(NASDAQ100/S&P500)もクエリパラメータで切り替え可能(2026-08-07追加)**。
+  それまでこのページはNASDAQ100固定表示で、S&P500のスクリーニング結果は
+  メール登録しないと見られなかった。register-stockのように owner_token に
+  紐付けたDB設定にはせず、langと同じ「`?universe=SP500`を都度指定する」
+  読み取り専用の方式にする(このページはログイン不要・書き込み一切なしの
+  設計原則を維持するため)。切替リンクは_universe_nav_html()が生成する
 """
 import html
 import os
@@ -42,7 +48,7 @@ import random
 
 import boto3
 
-from config import SETTINGS_TABLE_DEFAULT, selection_snapshot_key
+from config import SETTINGS_TABLE_DEFAULT, UNIVERSES, normalize_universe, selection_snapshot_key
 from report import LANG_EN, LANG_JA, render_selection_cards, selection_subject, t
 
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
@@ -65,12 +71,21 @@ def _detect_lang(event) -> str:
     return value if value in SUPPORTED_LANGS else LANG_JA
 
 
-def _get_selection_snapshot(mode: str) -> dict | None:
+def _detect_universe(event) -> str:
+    """対象指数(NASDAQ100/S&P500)の切り替え。ログイン不要・書き込み不要の
+    読み取り専用ページなので、register-stockのようにowner_token紐付けのDB設定に
+    せず、langと同じ「クエリパラメータで都度指定」方式にする(2026-08-07、
+    S&P500をこのページからも見られるようにする要望を受けて追加)。"""
+    params = event.get("queryStringParameters") or {}
+    return normalize_universe(params.get("universe"))
+
+
+def _get_selection_snapshot(mode: str, universe: str) -> dict | None:
     """daily-batchが保存した「本日の」選定スナップショットを読むだけ。
     新規スキャンは行わない(handler.pyのget_selection_snapshotと同じ設計)。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": selection_snapshot_key(mode)})
+        resp = table.get_item(Key={"key": selection_snapshot_key(mode, universe)})
         item = resp.get("Item")
         if not item or "ranked" not in item:
             return None
@@ -106,6 +121,7 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
 .mode-nav{display:flex;gap:8px;margin:14px 0 20px;flex-wrap:wrap;}
 .mode-nav a{border:1px solid var(--border);border-radius:100px;padding:6px 14px;
   font-size:13px;font-weight:600;color:var(--ink);}
+.universe-nav a.active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);}
 .notice-box{background:#eafbf0;border:1px solid #bbf0cf;border-radius:10px;
   padding:14px 16px;margin:22px 0;}
 .btn-link{display:inline-block;background:var(--accent);color:var(--accent-ink)!important;
@@ -139,28 +155,34 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
 """
 
 
-def _intro_html(lang: str) -> str:
+def _intro_html(lang: str, universe: str) -> str:
     """このページ自体がメイン機能の1つであるため、メール配信機能への言及は
     意図的に冒頭に置かない(2026-08-06、ユーザーからのフィードバックで修正)。
     メール登録の案内は_signup_pitch_html()としてページ下部にのみ置く。
 
     ただし「登録不要でそのまま読める」ことと「スパムなし・1クリックで削除できる」
     ことは、訪問者が読み進めるかどうかを決める安心材料なので冒頭に置く
-    (2026-08-07、apex統合で旧トップページから引き継いだtrust-line)。"""
+    (2026-08-07、apex統合で旧トップページから引き継いだtrust-line)。
+
+    見出し・本文の対象指数名はuniverseで動的に切り替える(2026-08-07、
+    NASDAQ100固定表記だとS&P500選択時に誤認を招くため)。"""
+    preset = UNIVERSES[universe]
     if lang == LANG_EN:
-        return """
+        label = preset["label_en"]
+        return f"""
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>PEG screening results (NASDAQ100)</h1>
-        <p>We rank NASDAQ100 growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
+        <h1>PEG screening results ({html.escape(label)})</h1>
+        <p>We rank {html.escape(label)} growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
         across three time horizons — short-term, mid-term, and long-term. Jump to one of
         the three below, or just scroll through all of them.</p>
         <p class="trust-line">👀 No signup needed to read this page ・ 🔒 If you do sign up,
         your email is used only for report delivery, no spam, delete anytime in one click.</p>
         """
-    return """
+    label = preset["label"]
+    return f"""
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>PEGスクリーニング結果（NASDAQ100）</h1>
-    <p>NASDAQ100構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
+    <h1>PEGスクリーニング結果（{html.escape(label)}）</h1>
+    <p>{html.escape(label)}構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
     短期・中期・長期の3つの期間でランキングしています。
     下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
     <p class="trust-line">👀 このページは登録不要でそのまま読めます ・
@@ -190,13 +212,27 @@ def _mode_nav_html(lang: str) -> str:
     return f'<div class="mode-nav">{links}</div>'
 
 
+def _universe_nav_html(lang: str, universe: str) -> str:
+    """対象指数の切り替え。langと同様クエリパラメータでの別ページ遷移方式
+    (mode-navのようなページ内アンカーではなく、ユニバースごとに全く異なる
+    銘柄・スナップショットを読むため、素のリンクで作り直す必要がある)。
+    現在選択中のlangはクエリに引き継ぎ、選択中のuniverseは強調表示する。"""
+    lang_qs = f"&lang={lang}" if lang != LANG_JA else ""
+    links = []
+    for key, preset in UNIVERSES.items():
+        label = preset["label_en"] if lang == LANG_EN else preset["label"]
+        cls = ' class="active"' if key == universe else ""
+        links.append(f'<a href="?universe={key}{lang_qs}"{cls}>{html.escape(label)}</a>')
+    return f'<div class="mode-nav universe-nav">{"".join(links)}</div>'
+
+
 def _back_to_top_html(lang: str) -> str:
     label = "↑ Back to top" if lang == LANG_EN else "↑ トップに戻る"
     return f'<p class="muted"><a href="#top">{label}</a></p>'
 
 
-def _mode_section_html(mode: str, lang: str, register_base_url: str) -> str:
-    snapshot = _get_selection_snapshot(mode)
+def _mode_section_html(mode: str, lang: str, universe: str, register_base_url: str) -> str:
+    snapshot = _get_selection_snapshot(mode, universe)
     heading = selection_subject(mode, lang).lstrip("📈 ")
     anchor = _ANCHOR[mode]
     back_to_top = _back_to_top_html(lang)
@@ -321,9 +357,10 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     """
 
 
-def _page(inner_html: str, lang: str, status: int = 200) -> dict:
-    title = ("PegSignal — NASDAQ100 PEG screening results"
-             if lang == LANG_EN else "PegSignal — NASDAQ100 PEGスクリーニング結果")
+def _page(inner_html: str, lang: str, universe: str, status: int = 200) -> dict:
+    preset = UNIVERSES[universe]
+    title = (f"PegSignal — {preset['label_en']} PEG screening results"
+             if lang == LANG_EN else f"PegSignal — {preset['label']} PEGスクリーニング結果")
     footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
     body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">
@@ -349,7 +386,8 @@ def handler(event, context):
     print(f"[ACCESS] preview path={path!r} ua={user_agent!r}")
 
     lang = _detect_lang(event)
-    sections = "".join(_mode_section_html(m, lang, REGISTER_URL) for m in _MODES)
-    inner = (_intro_html(lang) + _disclaimer_html(lang) + _mode_nav_html(lang)
-             + sections + _signup_pitch_html(lang, REGISTER_URL))
-    return _page(inner, lang)
+    universe = _detect_universe(event)
+    sections = "".join(_mode_section_html(m, lang, universe, REGISTER_URL) for m in _MODES)
+    inner = (_intro_html(lang, universe) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
+             + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL))
+    return _page(inner, lang, universe)
