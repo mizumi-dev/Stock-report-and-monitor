@@ -52,8 +52,8 @@ T = {
     "no_warnings": {LANG_JA: "なし", LANG_EN: "None"},
     "warn_dead_cross": {LANG_JA: "デッドクロス", LANG_EN: "Dead cross"},
     "peg_reference": {LANG_JA: "PEG(参考)", LANG_EN: "PEG (reference)"},
-    "signal_legend_summary": {LANG_JA: "🔎 シグナルの見方・PEGの基準（タップで表示）",
-                              LANG_EN: "🔎 How to read the signals & PEG criteria (tap to expand)"},
+    "signal_legend_summary": {LANG_JA: "🔎 シグナルの見方・PEGの基準",
+                              LANG_EN: "🔎 How to read the signals & PEG criteria"},
     "signal_legend": {
         LANG_JA: (
             "「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
@@ -318,7 +318,10 @@ def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_
     # ウェブのプレビューページ(短期・中期・長期の3回分)の両方から使われるため、
     # 常時表示だと特にプレビューページで文字量が多くなりすぎるとの指摘を受けて変更した。
     # <details>はHTML/CSSのみで動作しJS不要なため、対応しないメールクライアントでも
-    # 「常に展開された状態」として安全にフォールバックする。
+    # 「常に展開された状態」として安全にフォールバックする。ただしGmail等では実際に
+    # 「常時展開」される(タップしても折りたためない)ため、見出し文言で「タップで表示」
+    # と案内すると事実と異なる(2026-08-07、ユーザー報告で発覚)。<summary>の見た目自体が
+    # 折りたたみUIであることを示すため、文言側で操作方法を断定しないようにする。
     legend = (
         f'<details style="color:#888;font-size:12px;margin:8px 0;">'
         f'<summary style="cursor:pointer;">{t("signal_legend_summary", lang)}</summary>'
