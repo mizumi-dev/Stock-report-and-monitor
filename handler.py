@@ -481,19 +481,26 @@ def _dispatch(event: dict) -> dict:
     # TODO#8診断: S&P500構成銘柄取得(Wikipediaパース)が実際に機能するかの検証用。
     # サンドボックス開発環境からはWikipediaへの通信もブロックされているため、
     # 実際に外部通信できるdaily-batch-dev上でのみ検証できる。読み取りのみ。
+    if event.get("_test_fetch_sp500_raw_html"):
+        # IQVIAという誤ったティッカーが混入する原因を調べるための一時的な生HTML確認。
+        # Wikipediaの該当行の実際のマークアップを見て、正規表現をどう直すべきか判断する
+        import urllib.request
+        from data_sources import SP500_WIKI_URL, UA
+        req = urllib.request.Request(SP500_WIKI_URL, headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        idx = html.find("IQVIA")
+        return {"statusCode": 200, "body": {"excerpt": html[max(0, idx - 400):idx + 200]}}
+
     if event.get("_test_fetch_sp500"):
         from collections import Counter
         from data_sources import get_sp500_tickers
         tickers = get_sp500_tickers()
         dups = {t: c for t, c in Counter(tickers).items() if c > 1}
-        # IQVという実在ティッカーの代わりに"IQVIA"(会社名の一部)が誤って混入する
-        # 事象を調査するための一時的な確認項目(2026-08-07)
-        suspicious = [t for t in tickers if len(t) > 5 or not t.replace("-", "").isalpha()]
         return {"statusCode": 200, "body": {
             "count": len(tickers), "sample": tickers[:10],
             "unique_count": len(set(tickers)), "duplicates": dups,
             "has_IQV": "IQV" in tickers, "has_IQVIA": "IQVIA" in tickers,
-            "suspicious": suspicious,
         }}
 
     owner_token = event.get("owner_token")
