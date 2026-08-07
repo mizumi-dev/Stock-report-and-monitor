@@ -231,23 +231,36 @@ class TestPreviewLanguage:
 
 
 class TestPreviewIntroWording:
-    """導入部(_intro_html)ではメール配信機能に一切触れない(2026-08-06、
-    ユーザーからのフィードバックにより修正)。メール登録の案内はページ下部の
-    _signup_pitch_html()にのみ置く。"""
+    """導入部(_intro_html)ではメール配信機能をメインの謳い文句にしない
+    (2026-08-06、ユーザーからのフィードバックにより修正)。メール登録の
+    案内・比較表はページ下部の_signup_pitch_html()に置く。
 
-    def test_intro_does_not_mention_email_in_japanese(self, ph):
+    2026-08-07: apex統合後、「登録不要で読める」という安心材料の一部として
+    trust-line内でメールの取り扱い(スパムなし・1クリック削除)に触れるように
+    なった。これは「メール機能が主目的である」という誤解を招く見出し・導入文と
+    は別物なので、見出し(h1)・最初の段落ではメールに触れないことだけを検証する。"""
+
+    def test_h1_and_first_paragraph_do_not_mention_email_in_japanese(self, ph):
         for m in ("SHORT", "MID", "LONG"):
             _put_snapshot(ph, m)
         body = ph.handler(_event(), None)["body"]
-        intro = body.split('<h2 id="short"')[0]
-        assert "メール" not in intro
+        # h1の次の</p>までが最初の段落(trust-lineより前)
+        head = body.split("<h1>")[1].split("</p>")[0]
+        assert "メール" not in head
 
-    def test_intro_does_not_mention_email_in_english(self, ph):
+    def test_h1_and_first_paragraph_do_not_mention_email_in_english(self, ph):
         for m in ("SHORT", "MID", "LONG"):
             _put_snapshot(ph, m)
         body = ph.handler(_event(lang="en"), None)["body"]
-        intro = body.split('<h2 id="short"')[0]
-        assert "email" not in intro.lower()
+        head = body.split("<h1>")[1].split("</p>")[0]
+        assert "email" not in head.lower()
+
+    def test_intro_reassures_no_signup_needed(self, ph):
+        """登録不要で読めることは安心材料として明示する(2026-08-07追加)"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert "登録不要" in body
 
     def test_email_pitch_still_present_further_down_the_page(self, ph):
         """メール機能への言及自体を削除したわけではなく、位置を下部に移しただけ"""

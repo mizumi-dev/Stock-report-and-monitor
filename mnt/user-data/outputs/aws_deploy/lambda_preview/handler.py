@@ -112,13 +112,41 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
   border-radius:8px;padding:10px 18px;font-weight:600;text-decoration:none!important;}
 .site-footer{max-width:560px;margin:16px auto 0;text-align:center;}
 .disclaimer{border-left:3px solid var(--border);padding-left:10px;margin:0 0 18px;}
+/* 旧トップページ(register-stockの申込み画面)にあった、文字だけに頼らない
+   直感的な導入要素をこちらへ引き継いだもの(2026-08-07、apex統合に伴う移設)。
+   クラス名・見た目はregister-stock側の_PAGE_STYLEと揃えている */
+.trust-line{font-size:13px;color:var(--ink-muted);margin:0 0 16px;}
+.steps{display:flex;gap:8px;margin:14px 0 18px;}
+.step{flex:1;text-align:center;}
+.step-num{display:flex;align-items:center;justify-content:center;width:26px;height:26px;
+  margin:0 auto 4px;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+  font-size:13px;font-weight:700;}
+.step-label{font-size:11.5px;color:var(--ink-muted);}
+/* 「登録すると何が増えるのか」を一目で分かるようにする2列比較。
+   このページ自体が既に選定結果を見せているため、登録の価値は「差分」を
+   示すのが最も直感的という判断(2026-08-07、ユーザーからの指摘で追加) */
+.compare{display:flex;gap:10px;margin:6px 0 16px;flex-wrap:wrap;}
+.compare-col{flex:1 1 190px;border:1px solid var(--border);border-radius:10px;
+  padding:12px 14px;background:var(--card);}
+.compare-col.highlight{border-color:var(--accent);border-width:2px;padding:11px 13px;}
+.compare-head{font-size:12.5px;font-weight:700;margin:0 0 8px;}
+.compare-col.highlight .compare-head{color:var(--accent);}
+.compare-list{list-style:none;margin:0;padding:0;}
+.compare-list li{font-size:13px;padding:3px 0 3px 20px;position:relative;line-height:1.5;}
+.compare-list li::before{content:"✓";position:absolute;left:0;color:var(--accent);font-weight:700;}
+.compare-list li.off{color:var(--ink-muted);}
+.compare-list li.off::before{content:"—";color:var(--ink-muted);font-weight:400;}
 """
 
 
 def _intro_html(lang: str) -> str:
     """このページ自体がメイン機能の1つであるため、メール配信機能への言及は
     意図的に冒頭に置かない(2026-08-06、ユーザーからのフィードバックで修正)。
-    メール登録の案内は_signup_pitch_html()としてページ下部にのみ置く。"""
+    メール登録の案内は_signup_pitch_html()としてページ下部にのみ置く。
+
+    ただし「登録不要でそのまま読める」ことと「スパムなし・1クリックで削除できる」
+    ことは、訪問者が読み進めるかどうかを決める安心材料なので冒頭に置く
+    (2026-08-07、apex統合で旧トップページから引き継いだtrust-line)。"""
     if lang == LANG_EN:
         return """
         <p class="eyebrow">PegSignal (free, indie-built)</p>
@@ -126,6 +154,8 @@ def _intro_html(lang: str) -> str:
         <p>We rank NASDAQ100 growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
         across three time horizons — short-term, mid-term, and long-term. Jump to one of
         the three below, or just scroll through all of them.</p>
+        <p class="trust-line">👀 No signup needed to read this page ・ 🔒 If you do sign up,
+        your email is used only for report delivery, no spam, delete anytime in one click.</p>
         """
     return """
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
@@ -133,6 +163,8 @@ def _intro_html(lang: str) -> str:
     <p>NASDAQ100構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
     短期・中期・長期の3つの期間でランキングしています。
     下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
+    <p class="trust-line">👀 このページは登録不要でそのまま読めます ・
+    🔒 登録する場合もメールはレポート配信にのみ使用・スパムなし・いつでも1クリックで削除</p>
     """
 
 
@@ -206,11 +238,30 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     if lang == LANG_EN:
         return f"""
         <div class="notice-box">
-        <p><strong>Want to track specific stocks, or get this by email?</strong></p>
-        <p>This page always shows the latest top picks only. Sign up (free) to additionally:
-        pick individual stocks to watch, get daily/weekly/monthly trend &amp; momentum
-        alerts on them, and receive this selection report by email on your chosen
-        schedule.</p>
+        <h2 style="border-top:none;padding-top:0;margin-top:0;">What you get by signing up</h2>
+        <div class="compare">
+          <div class="compare-col">
+            <p class="compare-head">👀 This page (no signup)</p>
+            <ul class="compare-list">
+              <li>Read the current rankings</li>
+              <li class="off">Track your own stocks</li>
+              <li class="off">Get alerted when they change</li>
+            </ul>
+          </div>
+          <div class="compare-col highlight">
+            <p class="compare-head">✉️ Signed up (free)</p>
+            <ul class="compare-list">
+              <li>Read the current rankings</li>
+              <li><strong>Pick stocks to track</strong></li>
+              <li><strong>Trend / RSI / volume alerts by email</strong></li>
+            </ul>
+          </div>
+        </div>
+        <div class="steps">
+          <div class="step"><div class="step-num">1</div><div class="step-label">Enter your email</div></div>
+          <div class="step"><div class="step-num">2</div><div class="step-label">Pick stocks</div></div>
+          <div class="step"><div class="step-num">3</div><div class="step-label">Reports arrive</div></div>
+        </div>
         <form method="GET" action="{url}">
           <input type="hidden" name="lang" value="en">
           <input name="signup_email" type="email" placeholder="example@example.com"
@@ -229,10 +280,30 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
         """
     return f"""
     <div class="notice-box">
-    <p><strong>個別銘柄を監視したい方・メールで受け取りたい方へ</strong></p>
-    <p>このページは常に「最新の上位銘柄」だけを表示します。登録（無料）すると、
-    追加で以下が使えるようになります: 気になる銘柄を選んで監視・トレンド/モメンタム
-    の変化を通知・この選定レポートを選んだ頻度でメール受信。</p>
+    <h2 style="border-top:none;padding-top:0;margin-top:0;">登録すると何が増えるか</h2>
+    <div class="compare">
+      <div class="compare-col">
+        <p class="compare-head">👀 このページ（登録不要）</p>
+        <ul class="compare-list">
+          <li>今のランキングを見る</li>
+          <li class="off">自分の銘柄を監視</li>
+          <li class="off">変化をメールで通知</li>
+        </ul>
+      </div>
+      <div class="compare-col highlight">
+        <p class="compare-head">✉️ 登録すると（無料）</p>
+        <ul class="compare-list">
+          <li>今のランキングを見る</li>
+          <li><strong>気になる銘柄を監視</strong></li>
+          <li><strong>トレンド・RSI・出来高の変化をメールで通知</strong></li>
+        </ul>
+      </div>
+    </div>
+    <div class="steps">
+      <div class="step"><div class="step-num">1</div><div class="step-label">メール入力</div></div>
+      <div class="step"><div class="step-num">2</div><div class="step-label">銘柄を選ぶ</div></div>
+      <div class="step"><div class="step-num">3</div><div class="step-label">レポート受信</div></div>
+    </div>
     <form method="GET" action="{url}">
       <input name="signup_email" type="email" placeholder="example@example.com"
              style="width:100%;" required>
