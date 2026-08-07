@@ -526,6 +526,25 @@ def _dispatch(event: dict) -> dict:
             "has_IQV": "IQV" in tickers, "has_IQVIA": "IQVIA" in tickers,
         }}
 
+    # TODO#8診断: register-stockから配線したユニバース切替機能が、実際にS&P500の
+    # 選定スキャン(構成銘柄取得→並列データ取得→ランキング→スナップショット保存)
+    # まで一気通貫で動くかの実地検証用。_scan_universe自体は本番と同じ経路を通る
+    # (テスト用の特別分岐は無い)。スナップショット保存はdev環境のapp_settings-dev
+    # に対してのみ行われる(本番データには一切触れない)。
+    if event.get("_test_scan_universe"):
+        import time
+        t0 = time.monotonic()
+        ranked, signals_map = _scan_universe(
+            event.get("_test_scan_mode", "MID"),
+            event.get("_test_scan_universe_name", "SP500"),
+        )
+        return {"statusCode": 200, "body": {
+            "elapsed_sec": round(time.monotonic() - t0, 2),
+            "ranked_count": len(ranked),
+            "top5": [{"ticker": r["ticker"], "peg": r.get("peg")} for r in ranked[:5]],
+            "signals_map_count": len(signals_map),
+        }}
+
     owner_token = event.get("owner_token")
 
     # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ、保存済み
