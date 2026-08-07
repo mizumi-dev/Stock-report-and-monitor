@@ -81,10 +81,11 @@ def test_report_guide_link_carries_language_for_english_users():
     assert 'href="https://pegsignal.com/?guide=1&amp;lang=en"' in body
 
 
-def test_selection_report_strongest_signals_counts_buy_only_not_sell():
-    """sell_trend/sell_momentumは「シグナルが最も強い」の対象外(バグ修正)。
-    デッドクロス+買われすぎ(2件の売りシグナル)を持つ銘柄が、買いシグナル1件の
-    銘柄より「強い」と誤って紹介されてはいけない。"""
+def test_selection_report_strongest_signals_sell_outweighs_smaller_buy():
+    """トレンド・モメンタムは買い+1/売り-1で符号付きに加算し、出来高急増があれば
+    合計を2倍にする(2026-08-07、ユーザー指定の仕様)。デッドクロス+売られすぎ
+    (2件の売りシグナル、出来高急増で2倍)は(-1-1)*2=-4、買いシグナル1件のみは
+    +1なので、後者が「最も強い」として紹介される。"""
     ranked = [
         {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
         {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
@@ -92,6 +93,38 @@ def test_selection_report_strongest_signals_counts_buy_only_not_sell():
     signals_map = {
         "AAA": {"buy_trend": False, "buy_momentum": False,
                 "sell_trend": True, "sell_momentum": True, "volume_high": True},
+        "BBB": {"buy_trend": True, "buy_momentum": False,
+                "sell_trend": False, "sell_momentum": False, "volume_high": False},
+    }
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "シグナルが最も強いのは BBB です。" in body
+
+
+def test_selection_report_strongest_signals_volume_high_doubles_score():
+    """出来高急増(volume_high)は合計スコアを2倍にする。買いシグナル1件のみ(+1)より、
+    買いシグナル1件+出来高急増((+1)*2=2)の方が強いと判定される。"""
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
+        "BBB": {"buy_trend": True, "buy_momentum": False, "volume_high": True},
+    }
+    body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
+    assert "シグナルが最も強いのは BBB です。" in body
+
+
+def test_selection_report_strongest_signals_mixed_buy_and_sell_can_cancel_out():
+    """買い+1・売り-1が同一銘柄内で相殺されるとスコア0になり、正のスコアを
+    持つ他の銘柄の方が「最も強い」として紹介される。"""
+    ranked = [
+        {"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3},
+        {"ticker": "BBB", "company_name": "B社", "peg": 2.0, "earnings_growth": 0.25},
+    ]
+    signals_map = {
+        "AAA": {"buy_trend": True, "buy_momentum": False,
+                "sell_trend": False, "sell_momentum": True, "volume_high": False},
         "BBB": {"buy_trend": True, "buy_momentum": False,
                 "sell_trend": False, "sell_momentum": False, "volume_high": False},
     }
@@ -125,12 +158,14 @@ def test_selection_report_strongest_signals_ties_are_english_when_lang_is_en():
     assert "Strongest signals: AAA / BBB." in body
 
 
-def test_selection_report_strongest_signals_none_when_no_buy_signal():
+def test_selection_report_strongest_signals_none_when_no_net_positive_signal():
+    """全銘柄のスコアが0以下(シグナルなし、または売りが買いを上回る)の場合は
+    「シグナルが正味プラスの銘柄はありません」の注記になる。"""
     ranked = [{"ticker": "AAA", "company_name": "A社", "peg": 1.0, "earnings_growth": 0.3}]
     signals_map = {"AAA": {"buy_trend": False, "buy_momentum": False,
                            "sell_trend": True, "volume_high": True}}
     body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123")
-    assert "現在、買いシグナルが点灯している銘柄はありません。" in body
+    assert "現在、シグナルが正味プラスの銘柄はありません。" in body
 
 
 def test_selection_report_includes_broker_links():

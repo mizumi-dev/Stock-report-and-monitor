@@ -265,22 +265,25 @@ def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_
         return f"<p>{t('no_candidates', lang)}</p>"
 
     top = ranked[0]
-    # 「シグナルが最も強い」は買いシグナル(buy_trend・buy_momentum)のみを数える。
-    # volume_highは買い/売りの方向を持たない参考指標のため対象外(_render_info参照)。
-    # 以前はsell系も同じ重みで数えており、デッドクロス等の警告銘柄を誤って
-    # 「シグナルが最も強い」と紹介してしまうバグがあった。
-    buy_counts = {
-        s["ticker"]: sum(
-            1 for k in ("buy_trend", "buy_momentum") if signals_map.get(s["ticker"], {}).get(k)
-        )
-        for s in ranked
-    }
-    max_count = max(buy_counts.values())
-    strongest_tickers = [s["ticker"] for s in ranked if buy_counts[s["ticker"]] == max_count]
+    # 「シグナルが最も強い」のスコアリング(2026-08-07、ユーザー指定):
+    # トレンド・モメンタムはそれぞれ買い(🟢)+1・売り(🔴)-1・シグナルなし0で加算し、
+    # 出来高急増(volume_high)が立っていればその合計を2倍にする。同率トップは並列表示する。
+    # 以前は買いシグナルの個数のみを数え、売りシグナルを完全に無視していた
+    # (デッドクロス等の警告銘柄を誤って「最も強い」と紹介しないための対応だったが、
+    # 売りシグナルを一切考慮しないぶん粗すぎたため、符号付きスコアに変更)。
+    def _signal_score(ticker: str) -> int:
+        sig = signals_map.get(ticker, {})
+        score = sum(1 for k in ("buy_trend", "buy_momentum") if sig.get(k))
+        score -= sum(1 for k in ("sell_trend", "sell_momentum") if sig.get(k))
+        return score * 2 if sig.get("volume_high") else score
 
-    if max_count == 0:
-        strongest_note = ("No stock currently shows a buy signal." if lang == LANG_EN
-                          else "現在、買いシグナルが点灯している銘柄はありません。")
+    scores = {s["ticker"]: _signal_score(s["ticker"]) for s in ranked}
+    max_score = max(scores.values())
+    strongest_tickers = [s["ticker"] for s in ranked if scores[s["ticker"]] == max_score]
+
+    if max_score <= 0:
+        strongest_note = ("No stock currently shows a net positive signal." if lang == LANG_EN
+                          else "現在、シグナルが正味プラスの銘柄はありません。")
     elif lang == LANG_EN:
         strongest_note = f"Strongest signals: {' / '.join(strongest_tickers)}."
     else:
