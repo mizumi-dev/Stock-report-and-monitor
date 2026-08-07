@@ -486,9 +486,14 @@ def _dispatch(event: dict) -> dict:
         from data_sources import get_sp500_tickers
         tickers = get_sp500_tickers()
         dups = {t: c for t, c in Counter(tickers).items() if c > 1}
+        # IQVという実在ティッカーの代わりに"IQVIA"(会社名の一部)が誤って混入する
+        # 事象を調査するための一時的な確認項目(2026-08-07)
+        suspicious = [t for t in tickers if len(t) > 5 or not t.replace("-", "").isalpha()]
         return {"statusCode": 200, "body": {
             "count": len(tickers), "sample": tickers[:10],
             "unique_count": len(set(tickers)), "duplicates": dups,
+            "has_IQV": "IQV" in tickers, "has_IQVIA": "IQVIA" in tickers,
+            "suspicious": suspicious,
         }}
 
     owner_token = event.get("owner_token")
