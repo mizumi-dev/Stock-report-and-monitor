@@ -1762,8 +1762,10 @@ def handler(event, context):
                        else f"{label}レポートの送信に失敗しました: {html.escape(str(e))}")
             return _page(f"<p>{err_msg}</p>{_back_link(token, lang)}", status=500, lang=lang)
         _record_report_request(token)
-        notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email shortly." if lang == LANG_EN
-                  else f"{label}レポートの送信を受け付けました。まもなくメールが届きます。")
+        # 「メール到着まで1分ほど」はメイン画面のボタン付近の案内文言(既存)と表記を揃える
+        notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email "
+                  f"within a minute or so." if lang == LANG_EN
+                  else f"{label}レポートの送信を受け付けました。メール到着まで1分ほどかかります。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     ticker = (params.get("ticker") or "").strip().upper()

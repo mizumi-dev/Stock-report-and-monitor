@@ -375,6 +375,27 @@ class TestLanguageConsistency:
             found = re.findall(r"[ぁ-んァ-ン一-龥]+", body)
             assert not found, f"英語ページ {params or 'トップ'} に日本語が残っている: {found}"
 
+    NOTICE_RE = re.compile(
+        r'<p (?:class="notice"|style="background:#eef;padding:8px;border-radius:4px;")>(.*?)</p>'
+    )
+
+    def test_report_accepted_notice_shows_approximate_arrival_time_ja(self, rh):
+        """レポート送信ボタン押下時の通知に、メイン画面の案内文言(既存)と同じ
+        「メール到着まで1分ほど」という目安時間を表示する(ユーザー要望)。
+        同じ文言がボタン付近の静的な案内文にも既に存在するため、ページ全体では
+        なく通知(_render_formのnotice枠)の中身だけを見て検証する"""
+        r = rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        notice = self.NOTICE_RE.search(r["body"])
+        assert notice is not None
+        assert "メール到着まで1分ほどかかります" in notice.group(1)
+
+    def test_report_accepted_notice_shows_approximate_arrival_time_en(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, report="monitoring"), None)
+        notice = self.NOTICE_RE.search(r["body"])
+        assert notice is not None
+        assert "within a minute or so" in notice.group(1)
+
     def test_report_send_failure_page_is_fully_english(self, rh):
         rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
         rh.lambda_client.invoke.side_effect = RuntimeError("boom")
