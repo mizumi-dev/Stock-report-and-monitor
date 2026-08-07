@@ -155,7 +155,7 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
 """
 
 
-def _intro_html(lang: str, universe: str) -> str:
+def _intro_html(lang: str, universe: str, register_url: str) -> str:
     """このページ自体がメイン機能の1つであるため、メール配信機能への言及は
     意図的に冒頭に置かない(2026-08-06、ユーザーからのフィードバックで修正)。
     メール登録の案内は_signup_pitch_html()としてページ下部にのみ置く。
@@ -165,7 +165,13 @@ def _intro_html(lang: str, universe: str) -> str:
     (2026-08-07、apex統合で旧トップページから引き継いだtrust-line)。
 
     見出し・本文の対象指数名はuniverseで動的に切り替える(2026-08-07、
-    NASDAQ100固定表記だとS&P500選択時に誤認を招くため)。"""
+    NASDAQ100固定表記だとS&P500選択時に誤認を招くため)。
+
+    使い方ガイドへのリンクは、当初ページ最下部のsignup pitch内にしか無く、
+    先にランキングの読み方を知りたい訪問者が発見しづらかった。冒頭の
+    trust-lineの直後に移動する(2026-08-07、ユーザーからの指摘で追加)。
+    register-stock(app.pegsignal.com)のガイドページをそのまま使う"""
+    guide_url = html.escape(f"{register_url}?guide=1" + ("&lang=en" if lang == LANG_EN else ""))
     preset = UNIVERSES[universe]
     if lang == LANG_EN:
         label = preset["label_en"]
@@ -177,6 +183,7 @@ def _intro_html(lang: str, universe: str) -> str:
         the three below, or just scroll through all of them.</p>
         <p class="trust-line">👀 No signup needed to read this page ・ 🔒 If you do sign up,
         your email is used only for report delivery, no spam, delete anytime in one click.</p>
+        <p class="muted"><a href="{guide_url}">See how it works, with pictures →</a></p>
         """
     label = preset["label"]
     return f"""
@@ -187,6 +194,7 @@ def _intro_html(lang: str, universe: str) -> str:
     下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
     <p class="trust-line">👀 このページは登録不要でそのまま読めます ・
     🔒 登録する場合もメールはレポート配信にのみ使用・スパムなし・いつでも1クリックで削除</p>
+    <p class="muted"><a href="{guide_url}">図でわかる使い方ガイドを見る →</a></p>
     """
 
 
@@ -310,8 +318,7 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
         <p class="muted">Your email is used only to deliver reports and your access link,
         and is never shared with third parties. By signing up you agree to our
         <a href="{url}?terms=1&amp;lang=en">Terms</a> and
-        <a href="{url}?privacy=1&amp;lang=en">Privacy Policy</a>.
-        <a href="{url}?guide=1&amp;lang=en">See how it works, with pictures →</a></p>
+        <a href="{url}?privacy=1&amp;lang=en">Privacy Policy</a>.</p>
         </div>
         """
     return f"""
@@ -351,8 +358,7 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     <p class="muted">登録いただくメールアドレスはレポート配信・ログイン用リンクの
     送信にのみ使用し、第三者への提供は行いません。お申込みは
     <a href="{url}?terms=1">利用規約</a>・<a href="{url}?privacy=1">プライバシーポリシー</a>
-    への同意とみなされます。
-    <a href="{url}?guide=1">図でわかる使い方ガイドを見る →</a></p>
+    への同意とみなされます。</p>
     </div>
     """
 
@@ -388,6 +394,6 @@ def handler(event, context):
     lang = _detect_lang(event)
     universe = _detect_universe(event)
     sections = "".join(_mode_section_html(m, lang, universe, REGISTER_URL) for m in _MODES)
-    inner = (_intro_html(lang, universe) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
+    inner = (_intro_html(lang, universe, REGISTER_URL) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
              + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL))
     return _page(inner, lang, universe)
