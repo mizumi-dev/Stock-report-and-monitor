@@ -47,6 +47,10 @@ DAILY_BATCH_FUNCTION = os.environ.get("DAILY_BATCH_FUNCTION", "daily-batch")
 SES_SENDER = os.environ.get("SES_SENDER", "")
 SES_RECIPIENT = os.environ.get("SES_RECIPIENT", "")
 REGISTER_FUNCTION_URL = os.environ.get("REGISTER_FUNCTION_URL", "")
+# landing-preview(メール登録不要で選定レポートを読める読み取り専用ページ)のURL。
+# 未設定なら申込み画面にリンクを出さない(dev環境等、まだ用意していない場合の
+# 既存の他リンクと同じフォールバック方針)
+PREVIEW_URL = os.environ.get("PREVIEW_URL", "")
 # SESが本番アクセス許可待ち(サンドボックス)の間など、新規登録だけを一時停止したい時に
 # "false"にする。既存トークンでのアクセス(レポート受信・銘柄変更・退会等)には影響しない
 SIGNUPS_ENABLED = os.environ.get("SIGNUPS_ENABLED", "true").lower() != "false"
@@ -450,6 +454,20 @@ def _record_report_request(owner_token: str):
                          "value": datetime.now(timezone.utc).isoformat()})
 
 
+def _preview_link_html(preview_url: str, lang: str) -> str:
+    """メール登録不要で選定レポートを読めるlanding-previewへの案内リンク。
+    PREVIEW_URL未設定(dev環境の初期状態等)では何も出さない(壊れたリンクを
+    出さない、既存の各種案内リンクと同じフォールバック方針)。"""
+    if not preview_url:
+        return ""
+    url = html.escape(preview_url)
+    if lang == LANG_EN:
+        text = "Just want to see it first? View this week's picks without signing up"
+    else:
+        text = "まずは中身だけ見たい方へ — 登録せずに今週の選定結果を見る"
+    return f'<p><a href="{url}">👀 {text} →</a></p>'
+
+
 def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     n1, n2 = random.randint(1, 9), random.randint(1, 9)
 
@@ -496,6 +514,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
           guarantee its accuracy or timeliness. See <a href="?info=1">how it works</a>
           for details.</p>
         </details>
+
+        {_preview_link_html(PREVIEW_URL, LANG_EN)}
 
         <h3>Sign up</h3>
         <p class="muted">Your email is used <strong>only to deliver reports and your
@@ -558,6 +578,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
       基づいており、正確性・遅延について当サービスは保証しません。詳しくは
       <a href="?info=1">この仕組みについて</a>をご覧ください。</p>
     </details>
+
+    {_preview_link_html(PREVIEW_URL, LANG_JA)}
 
     <h3>お申込み</h3>
     <p class="muted">ご登録いただいたメールアドレスは<strong>レポート配信・ログイン用
