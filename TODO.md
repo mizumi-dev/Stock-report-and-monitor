@@ -70,13 +70,18 @@
    (`docs/growth-drafts.md`を修正)。あわせて、**previewページに免責が一切
    表示されていなかった問題を修正**(メール本文の`build_selection_report`には
    免責があるが、previewが使う`render_selection_cards`には含まれていなかった)
-2. **未着手**: `app.pegsignal.com`をregister-stock用に用意し、メール内リンクを
-   生Lambda URL(`xxxxx.lambda-url.us-east-1.on.aws`)からこれに切替。
-   **現状メールに生のAWS URLが入っており、フィッシングに見えて信頼性・
-   到達率を損なっている**。apexの議論より緊急度が高い
+2. **対応済み(2026-08-07)**: `app.pegsignal.com`をregister-stock用に用意
+   (`deploy_domain_app.sh`、`deploy_domain_en.sh`と同じパターン)。
+   register-stock・daily-batch両方の`REGISTER_FUNCTION_URL`環境変数を
+   生Lambda URL(`xxxxx.lambda-url.us-east-1.on.aws`)から
+   `https://app.pegsignal.com/`に切替済み。これでメール内リンク(レポート
+   即時発行の確認リンク・アクセス用リンク等)がブランド化されたドメインに
+   なった。`pegsignal.com`本体には一切触れておらず、同じLambda(register-stock)
+   を指す別ドメインを追加しただけなので、切替期間中はどちらのドメインでも
+   アクセスできる状態
 3. **未着手**: `pegsignal.com`の向き先をlanding-previewに入れ替え、apexを
-   コンテンツにする。2が済んでいれば既存ユーザーのアクセスリンクは無影響
-   (現在のメールリンクは生Lambda URLを指しているため、apex入れ替えでは壊れない)
+   コンテンツにする。2が完了したため、既存ユーザーのメール内リンクは
+   `app.pegsignal.com`を指しており、apex入れ替えの影響を受けない
 
 ### 下書き文面（Claudeが用意、ユーザーが選んで投稿する想定）
 実際の投稿はユーザー自身の判断・アカウントで行う。文面は`docs/growth-drafts.md`
