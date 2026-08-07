@@ -40,8 +40,14 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
     長期の選定レポートを登録不要で閲覧できる読み取り専用ページ(2026-08-06追加、
     `mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py`)。
     `app_settings`のselection_snapshotを読むだけで書き込みは一切行わない。
-    本番ドメイン(pegsignal.com/en.pegsignal.com)には未接続の独立URLで、
-    公開判断が下りるまでCloudFrontには載せない
+    IAMロールもGetItemのみで書き込み権限を持たない(匿名トラフィックが最も
+    集まる面を、書き込み能力を持つプロセスから意図的に隔離する設計)。
+    **`preview.pegsignal.com`サブドメインとして本番ドメインへ統合済み
+    (2026-08-07)**。`pegsignal.com`本体のCloudFrontディストリビューションには
+    一切手を加えず、`en.pegsignal.com`と同じパターン(別ACM証明書・別
+    CloudFrontディストリビューション・同じRoute53ホストゾーン内の別レコード)
+    で追加した(`deploy_domain_preview.sh`)。register-stockの申込み画面には
+    `PREVIEW_URL`環境変数が設定されていれば「登録せずに見る」リンクが表示される
 - マルチテナント設計。`owner_token`でユーザーを識別
 - DynamoDBテーブル:
   - `watchlist`: ユーザーごとの監視銘柄
