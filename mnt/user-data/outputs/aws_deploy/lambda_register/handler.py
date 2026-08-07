@@ -23,7 +23,6 @@ from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 
 from config import (
-    DEFAULT_UNIVERSE,
     MAX_PEG,
     MIN_GROWTH,
     PERIOD_PRESETS,
@@ -340,18 +339,32 @@ def _current_watchlist(owner_token: str) -> list[str]:
     return sorted(item["ticker"] for item in resp.get("Items", []))
 
 
-def _is_known_ticker(ticker: str, universe: str = DEFAULT_UNIVERSE) -> bool:
-    """daily-batchが保存する構成銘柄キャッシュ(利用者が選んだ対象指数のもの)と
-    突き合わせ、実在しない/打ち間違えたティッカーの登録を防ぐ(TODO#13)。
-    キャッシュ自体が未生成・読み取り失敗の場合は、正しい銘柄の登録を
+def _is_known_ticker(ticker: str) -> bool:
+    """daily-batchが保存する構成銘柄キャッシュと突き合わせ、実在しない/打ち間違えた
+    ティッカーの登録を防ぐ(TODO#13)。
+
+    これは「打ち間違いの検出」であって「対象指数による絞り込み」ではないため、
+    対応する全ユニバースのキャッシュのいずれかに含まれていれば許可する。
+    監視レポートは対象指数に依存せず「利用者が明示的に選んだ銘柄」を見張る機能
+    なので、選択中の指数の外にある銘柄を監視したいケースは正当
+    (例: 対象指数はS&P500にしつつ、NASDAQ100固有のPDDも監視し続けたい)。
+    選択中の指数だけで判定すると、指数を切り替えた利用者が「既存の監視銘柄は
+    残るのに、消すと二度と登録できない」という一貫性のない状態に陥る。
+
+    キャッシュが1つも無い/読み取り失敗の場合は、正しい銘柄の登録を
     誤ってブロックしないよう許可する(fail-open)"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": universe_cache_key(universe)})
-        known = resp.get("Item", {}).get("value")
-        if not known:
-            return True
-        return ticker in known
+        has_any_cache = False
+        for universe in UNIVERSES:
+            resp = table.get_item(Key={"key": universe_cache_key(universe)})
+            known = resp.get("Item", {}).get("value")
+            if not known:
+                continue
+            has_any_cache = True
+            if ticker in known:
+                return True
+        return not has_any_cache
     except Exception as e:
         print(f"[WARN] 銘柄キャッシュの確認に失敗、登録は許可: {e}")
         return True
@@ -812,8 +825,9 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           <button type="submit" style="padding:8px 16px;">Change</button>
         </form>
         <p style="color:#888;font-size:12px;">
-          Current: <strong>{universe_preset['label_en']}</strong> — selection reports rank stocks from this index.
-          New tickers you register must belong to it too.</p>
+          Current: <strong>{universe_preset['label_en']}</strong> — this only changes which index the
+          <strong>selection report</strong> ranks. Your watchlist is unaffected: you can track any
+          stock from either index, whichever you pick here.</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -880,8 +894,9 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
       <button type="submit" style="padding:8px 16px;">変更</button>
     </form>
     <p style="color:#888;font-size:12px;">
-      現在: <strong>{universe_preset['label']}</strong> — 選定レポートはこの指数の構成銘柄から選びます。
-      新規登録する銘柄もこの指数に含まれている必要があります。</p>
+      現在: <strong>{universe_preset['label']}</strong> — ここで変わるのは
+      <strong>選定レポート</strong>がどの指数からランキングするかだけです。
+      監視リストには影響しません（どちらを選んでも、両方の指数の銘柄を登録・監視できます）。</p>
 
     <hr style="margin:24px 0;">
     <h3>レポートを今すぐ送信</h3>
@@ -965,7 +980,29 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
     mode = get_period_mode(token)
-    universe_preset = UNIVERSES[get_universe(token)]
+    # このページはトップページからトークン無しでも辿れる(申込み前の判断材料)。
+    # 未登録の訪問者には「メイン画面で変更できます」と言っても意味が通らず、
+    # 特定の指数を断定するとNASDAQ100専用サービスだと誤解されるため、
+    # 登録済み(トークンあり)かどうかで書き分ける
+    if token:
+        universe_preset = UNIVERSES[get_universe(token)]
+        universe_note = (
+            f"<strong>{universe_preset['label_en']}</strong> constituents "
+            f'(you can change this under "Index universe" on the main screen)'
+            if lang == LANG_EN else
+            f"<strong>{universe_preset['label']}</strong>構成銘柄"
+            f"（メイン画面の「対象指数」から変更できます）"
+        )
+    else:
+        labels = " or ".join(p["label_en"] for p in UNIVERSES.values())
+        labels_ja = "または".join(p["label"] for p in UNIVERSES.values())
+        universe_note = (
+            f"<strong>{labels}</strong> constituents "
+            f"(you choose which one after signing up, and can switch anytime)"
+            if lang == LANG_EN else
+            f"<strong>{labels_ja}</strong>構成銘柄"
+            f"（登録後にどちらかを選べます。いつでも切替可能）"
+        )
 
     if lang == LANG_EN:
         rows_en = []
@@ -995,8 +1032,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
         <details open>
           <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
-          <p>Universe: <strong>{universe_preset['label_en']}</strong> constituents (you can change
-          this under "Index universe" on the main screen). Only stocks
+          <p>Universe: {universe_note}. Only stocks
           meeting both conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
           <ul>
@@ -1066,8 +1102,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
     <details open>
       <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
-      <p>対象: <strong>{universe_preset['label']}</strong>構成銘柄（メイン画面の「対象指数」から
-      変更できます）。次の条件を両方満たす
+      <p>対象: {universe_note}。次の条件を両方満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
         <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
@@ -1274,7 +1309,22 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p class="muted">You can change this at any time from the main screen, and it takes
         effect from the next report.</p>
 
-        <h4>6. A typical week</h4>
+        <h4>6. Choosing your index</h4>
+        <div class="guide-card">
+          <span class="tag blue">NASDAQ100</span>
+          <p>The 100 largest non-financial companies on the NASDAQ — tech-heavy, and the
+          default. Fewer stocks, so the ranking moves less from week to week.</p>
+        </div>
+        <div class="guide-card">
+          <span class="tag">S&amp;P 500</span>
+          <p>500 large US companies across every sector, including finance, healthcare and
+          energy. A wider net, so you'll see names that never appear in the NASDAQ100 list.</p>
+        </div>
+        <p class="muted">This setting only changes which index the <strong>selection
+        report</strong> ranks. Your watchlist is unaffected — you can track stocks from either
+        index no matter which one you pick here.</p>
+
+        <h4>7. A typical week</h4>
         <div class="guide-card">
           <p><strong>①</strong> A selection report arrives. Something catches your eye.</p>
           <p><strong>②</strong> Tap "Add to watchlist" right inside the email.</p>
@@ -1367,7 +1417,22 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     長期モードでは正常な状態です。</p>
     <p class="muted">メイン画面からいつでも変更でき、次回のレポートから反映されます。</p>
 
-    <h4>6. 使い方の流れ（例）</h4>
+    <h4>6. 対象指数の選び方</h4>
+    <div class="guide-card">
+      <span class="tag blue">NASDAQ100</span>
+      <p>NASDAQ市場の代表的な100社。ハイテク企業の比率が高く、これが初期設定です。
+      銘柄数が少ないぶん、ランキングの顔ぶれは週ごとに大きくは変わりません。</p>
+    </div>
+    <div class="guide-card">
+      <span class="tag">S&amp;P500</span>
+      <p>金融・ヘルスケア・エネルギーなど全業種を含む、米国の主要500社。対象が広いぶん、
+      NASDAQ100のランキングには決して出てこない銘柄も見られます。</p>
+    </div>
+    <p class="muted">この設定で変わるのは<strong>選定レポート</strong>がどの指数から
+    ランキングするかだけです。監視リストには影響しません（どちらを選んでも、両方の指数の
+    銘柄を登録・監視できます）。</p>
+
+    <h4>7. 使い方の流れ（例）</h4>
     <div class="guide-card">
       <p><strong>①</strong> 選定レポートが届く。気になる銘柄を見つける。</p>
       <p><strong>②</strong> メール内の「この銘柄を監視リストに登録」を押す。</p>
@@ -1864,14 +1929,15 @@ def handler(event, context):
                   else f"{ticker} を監視リストから削除しました。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
-    universe = get_universe(token)
-    if not _is_known_ticker(ticker, universe):
-        universe_preset = UNIVERSES[universe]
-        universe_label = universe_preset["label_en"] if lang == LANG_EN else universe_preset["label"]
+    # 対象指数に関わらず、対応している全指数の構成銘柄を登録できる(_is_known_ticker
+    # の判定は打ち間違い検出が目的で、対象指数の絞り込みではないため)
+    if not _is_known_ticker(ticker):
+        known_labels = "・".join(p["label"] for p in UNIVERSES.values())
+        known_labels_en = " / ".join(p["label_en"] for p in UNIVERSES.values())
         notice = (f'Couldn\'t find a ticker called "{ticker}". Please check the symbol '
-                   f"against {universe_label} constituents and try again." if lang == LANG_EN
+                   f"against {known_labels_en} constituents and try again." if lang == LANG_EN
                   else f"「{ticker}」という銘柄は見つかりませんでした。"
-                       f"{universe_label}構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
+                       f"{known_labels}構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
         return _page(_render_form(token, lang, notice=notice), status=400, lang=lang)
 
     watchlist = _current_watchlist(token)
