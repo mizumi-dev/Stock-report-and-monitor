@@ -61,15 +61,25 @@ def get_sp500_tickers(fallback: list[str] | None = None) -> list[str]:
         end = html.find('id="change', start)
         section = html[start:end if end != -1 else start + 500_000]
 
-        # 各行の1列目(Symbol)は <td><a ...>TICKER</a> という形。BRK.B/BF.Bのような
-        # ピリオド入りティッカーも許可する
-        tickers = re.findall(r'<td[^>]*>\s*<a[^>]*>([A-Z]{1,6}(?:\.[A-Z])?)</a>', section)
+        # 各行(<tr>)の1列目(Symbol)が <td><a ...>TICKER</a> という形。BRK.B/BF.Bのような
+        # ピリオド入りティッカーも許可する。行ごとに区切ってから最初の一致だけを
+        # 拾う設計にしている点が重要: 2列目(Security名)にも<td><a>リンクがあり、
+        # IQVIA(社名がそのままティッカー風の全大文字)のような銘柄では2列目も
+        # 正規表現にマッチしてしまい、行全体をfindallすると誤ったティッカー("IQVIA"、
+        # 本来は"IQV")や既存ティッカーの重複("IBM"の記事タイトルがそのまま"IBM"のため)
+        # が混入することを実データ検証(2026-08-07)で確認した
+        row_pattern = re.compile(r'<td[^>]*>\s*<a[^>]*>([A-Z]{1,6}(?:\.[A-Z])?)</a>')
+        tickers = []
+        for row in re.split(r'<tr\b', section)[1:]:
+            m = row_pattern.search(row)
+            if m:
+                tickers.append(m.group(1))
         # yfinance側の表記に合わせ、"BRK.B"のようなピリオドはハイフンに変換する
         # (yfinanceはクラス株をBRK-Bのように表記する)
         tickers = [t.replace(".", "-") for t in tickers]
-        # 実データ検証(2026-08-07)で、ページ内の脚注等により1銘柄だけ重複して
-        # マッチすることがあると判明した。原因のページ構造までは特定していないが、
-        # 実害としては重複除去で十分安全に解消できるため、順序を保ったまま除去する
+        # 行スコープでのパースにより既知の原因(2列目の誤マッチ)は解消済みだが、
+        # 未知のページ構造要因での重複に備えた安全策として、順序を保ったまま
+        # 重複除去しておく(実害はなく、正しい銘柄を誤って落とすことはない)
         tickers = list(dict.fromkeys(tickers))
         if len(tickers) < 400:  # 500件のはずが大幅に少ない場合はパース失敗とみなす
             raise ValueError(f"取得件数が少なすぎる({len(tickers)}件)")

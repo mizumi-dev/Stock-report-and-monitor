@@ -100,12 +100,37 @@ class TestGetSp500Tickers:
         assert len(result) == len(set(result))
 
     def test_deduplicates_repeated_ticker_while_preserving_order(self):
-        """実データ検証(2026-08-07)で、ページ内の脚注等が原因と見られる重複
-        マッチ(IBMが2件)が発生することを確認した。原因のページ構造までは特定
-        していないが、順序を保ったまま重複除去することで安全に解消する。"""
+        """行スコープでのパースにより既知の原因(2列目の誤マッチ)は解消したが、
+        未知の原因での重複に備えた安全策として重複除去を残している。"""
         tickers = _fake_tickers(449)
         html = _fake_sp500_html(tickers + [tickers[100]])  # 101件目を意図的に重複させる
         with mock.patch("data_sources.urllib.request.urlopen", return_value=_mock_urlopen(html)):
             result = get_sp500_tickers()
         assert result == tickers
         assert len(result) == len(set(result))
+
+    def test_does_not_pick_up_ticker_shaped_company_name_from_second_column(self):
+        """実データ検証(2026-08-07)で、IQVIA Holdings(ティッカーIQV)のように
+        Security名(2列目)がそのまま全大文字・短い単語だと、2列目まで正規表現に
+        マッチしてしまい、誤ったティッカー("IQVIA")や既存ティッカーの重複
+        ("IBM"の記事タイトルがそのまま"IBM"のため)が混入することが判明した。
+        行ごとに区切って最初の一致だけを拾う設計で、2列目以降は無視すること。"""
+        tickers = _fake_tickers(449)
+        rows = "".join(
+            f'<tr><td><a href="#">{t}</a></td><td><a href="#">Company {t}</a></td></tr>'
+            for t in tickers
+        )
+        # IQVIAは実在の事例そのまま: 1列目=正しいティッカー"IQV"、
+        # 2列目=会社名がそのままティッカー風の全大文字"IQVIA"
+        rows += '<tr><td><a href="#">IQV</a></td><td><a href="#">IQVIA</a></td></tr>'
+        html = f"""
+        <html><body>
+        <h2 id="constituents">S&amp;P 500 component stocks</h2>
+        <table class="wikitable">{rows}</table>
+        <h2 id="changes">Selected changes</h2>
+        </body></html>
+        """
+        with mock.patch("data_sources.urllib.request.urlopen", return_value=_mock_urlopen(html)):
+            result = get_sp500_tickers()
+        assert "IQV" in result
+        assert "IQVIA" not in result
