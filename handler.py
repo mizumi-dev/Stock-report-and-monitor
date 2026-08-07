@@ -21,7 +21,6 @@ from config import (
     FETCH_MAX_WORKERS,
     MIN_FETCH_SUCCESS_RATIO,
     NASDAQ100_CACHE_KEY,
-    PERIOD_MODE_KEY,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
     get_preset,
@@ -407,12 +406,63 @@ def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_rep
     )
 
 
+def _diagnose_fetch_timing(n: int) -> dict:
+    """TODO#3診断用。yfinanceのYfDataがプロセス全体のシングルトンであるとソースコード
+    (yfinance/data.py, SingletonMeta + threading.Lock)から判明したため、"逐次 vs 並列"
+    に加えて "history()のみ vs .info込み" の内訳も計測し、ボトルネックの所在を切り分ける。
+    書き込みは一切行わない(読み取り専用の診断)。"""
+    import time
+
+    cached = get_cached_tickers()
+    tickers = get_nasdaq100_tickers(fallback=cached)[:n]
+
+    def fetch_history_only(t):
+        start = time.monotonic()
+        d = get_stock_data(t, period="6mo", min_rows=1)
+        return t, time.monotonic() - start, d.get("error")
+
+    # 逐次
+    t0 = time.monotonic()
+    seq_results = [fetch_history_only(t) for t in tickers]
+    seq_total = time.monotonic() - t0
+
+    # 並列(本番と同じFETCH_MAX_WORKERS)
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as ex:
+        par_results = list(ex.map(fetch_history_only, tickers))
+    par_total = time.monotonic() - t0
+
+    seq_avg = sum(r[1] for r in seq_results) / len(seq_results) if seq_results else 0
+    par_avg = sum(r[1] for r in par_results) / len(par_results) if par_results else 0
+    errors = [r[0] for r in par_results if r[2]]
+
+    result = {
+        "n_tickers": len(tickers),
+        "workers": FETCH_MAX_WORKERS,
+        "sequential_total_sec": round(seq_total, 2),
+        "sequential_avg_per_ticker_sec": round(seq_avg, 2),
+        "parallel_total_sec": round(par_total, 2),
+        "parallel_avg_per_ticker_sec": round(par_avg, 2),
+        "speedup": round(seq_total / par_total, 2) if par_total else None,
+        "errors": errors,
+    }
+    print(f"[DIAG] fetch timing: {result}")
+    return {"statusCode": 200, "body": result}
+
+
 def _dispatch(event: dict) -> dict:
     # TODO#7b: 例外捕捉→通知の経路を本番に影響を与えずテストするためのフック。
     # 実データには一切触れず即座に例外を送出するだけなので、実AWS環境で安全に
     # 障害通知の実地確認ができる(test-skip-reviewスキルでの検討結果を反映)。
     if event.get("_test_trigger_failure"):
         raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
+
+    # TODO#3: 銘柄ユニバース拡張(S&P500)の着手条件になっている並列化タイムアウト
+    # 対策の実データ検証用フック。このサンドボックス開発環境からはYahoo Financeへの
+    # 通信がブロックされておりテストできないため、実際にネットワーク到達できる
+    # daily-batch-dev上でのみ実行して計測する。読み取りのみで副作用は無い。
+    if event.get("_test_fetch_timing"):
+        return _diagnose_fetch_timing(event.get("_test_fetch_timing_n", 20))
 
     owner_token = event.get("owner_token")
 
