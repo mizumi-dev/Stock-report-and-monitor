@@ -42,19 +42,26 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
     `app_settings`のselection_snapshotを読むだけで書き込みは一切行わない。
     IAMロールもGetItemのみで書き込み権限を持たない(匿名トラフィックが最も
     集まる面を、書き込み能力を持つプロセスから意図的に隔離する設計)。
-    **`preview.pegsignal.com`サブドメインとして本番ドメインへ統合済み
-    (2026-08-07)**。`pegsignal.com`本体のCloudFrontディストリビューションには
-    一切手を加えず、`en.pegsignal.com`と同じパターン(別ACM証明書・別
-    CloudFrontディストリビューション・同じRoute53ホストゾーン内の別レコード)
-    で追加した(`deploy_domain_preview.sh`)。register-stockの申込み画面には
-    `PREVIEW_URL`環境変数が設定されていれば「登録せずに見る」リンクが表示される
-- **メール内リンクは`app.pegsignal.com`(2026-08-07追加)**。register-stock・
-  daily-batch共通の`REGISTER_FUNCTION_URL`環境変数が指すドメインで、以前は
-  生のLambda Function URL(`xxxxx.lambda-url.us-east-1.on.aws`)だったが、
+    **`pegsignal.com`(apex)の中身はこのLambda(2026-08-07、expert-panel-review
+    での検討結果、apexをコンテンツ表示側に切替)**。ページ下部には申込み
+    フォームを埋め込んでおり(メール入力欄+CAPTCHA)、`method="GET"`の素の
+    HTMLフォームで`action`を`app.pegsignal.com`(register-stock)に向けている
+    だけなので、実際の登録処理(重複チェック・トークン発行・ダブルオプトイン
+    メール送信)は一切複製していない。CAPTCHA用の乱数2つだけこちらでも
+    生成するが、register-stock側の検証が完全にステートレスなため安全
+- **`app.pegsignal.com`(2026-08-07追加)**: `register-stock`(申込み処理の実体・
+  銘柄監視・設定変更・レポート即時発行・退会・各種情報ページ)が住むドメイン。
+  register-stock・daily-batch共通の`REGISTER_FUNCTION_URL`環境変数が指す。
+  以前は生のLambda Function URL(`xxxxx.lambda-url.us-east-1.on.aws`)だったが、
   株式サービスのメールに生のAWS URLが入っているとフィッシングに見え信頼性・
-  到達率を損なうため、ブランド化されたサブドメインに切替済み(`deploy_domain_app.sh`、
-  `pegsignal.com`本体には触れず同じregister-stock Lambdaを指す別ドメインを追加)。
-  レポート即時発行の確認リンク・アクセス用リンク等はすべてこのドメインを使う
+  到達率を損なうため、ブランド化されたサブドメインに切替済み(`deploy_domain_app.sh`)。
+  レポート即時発行の確認リンク・アクセス用リンク・`pegsignal.com`の申込み
+  フォーム送信先等はすべてこのドメインを使う
+- **`preview.pegsignal.com`は無効化済み(2026-08-07)**。apexが同じ内容
+  (landing-preview)を表示するようになったため中身が完全に重複し、
+  非表示にした(`deploy_domain_preview.sh`で作成したCloudFront
+  ディストリビューション`EZW5FYV1PT3FO`は`Enabled=False`のまま残置。
+  削除はしていないので必要ならいつでも復元できる)
 - マルチテナント設計。`owner_token`でユーザーを識別
 - DynamoDBテーブル:
   - `watchlist`: ユーザーごとの監視銘柄
