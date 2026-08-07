@@ -121,16 +121,16 @@ _ICON_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(_ICON_SVG.encod
 
 
 _SITE_TITLE = {
-    LANG_JA: "PegSignal（株式レポートサービス） | NASDAQ100 成長株シグナル配信",
-    LANG_EN: "PegSignal | NASDAQ100 growth-stock signal alerts",
+    LANG_JA: "PegSignal（株式レポートサービス） | NASDAQ100・S&P500 成長株シグナル配信",
+    LANG_EN: "PegSignal | NASDAQ100 / S&P 500 growth-stock signal alerts",
 }
 _SITE_DESCRIPTION = {
     LANG_JA: (
-        "PEGレシオが低い成長株をNASDAQ100構成銘柄から選定し、"
+        "PEGレシオが低い成長株をNASDAQ100・S&P500構成銘柄から選定し、"
         "トレンド・モメンタム・出来高のシグナルを定期メールで通知する無料サービスです。"
     ),
     LANG_EN: (
-        "A free service that screens NASDAQ100 constituents for growth stocks with a low "
+        "A free service that screens NASDAQ100 / S&P 500 constituents for growth stocks with a low "
         "PEG ratio and emails you trend, momentum, and volume signals on a regular schedule."
     ),
 }
@@ -445,7 +445,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         return f"""
         {notice_html}
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>NASDAQ100 growth stocks, ranked by PEG, delivered on a schedule</h1>
+        <h1>NASDAQ100 / S&amp;P 500 growth stocks, ranked by PEG, delivered on a schedule</h1>
         <p class="trust-line">🔒 Your email is used only for report delivery, no spam.
         <a href="?about=1">Delete your data anytime, one click.</a></p>
 
@@ -472,7 +472,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
 
         <details>
           <summary>How stocks are picked, and important notes</summary>
-          <p>We screen NASDAQ100 constituents for growth stocks with a low
+          <p>We screen NASDAQ100 or S&amp;P 500 constituents (your choice, switchable anytime)
+          for growth stocks with a low
           <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
           we monitor trend, momentum, and volume signals on a regular schedule.</p>
           <p class="muted">How often you hear from us depends on the time horizon you pick
@@ -507,7 +508,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     return f"""
     {notice_html}
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>NASDAQ100構成銘柄のPEGスクリーニング結果を、定期メールでチェック</h1>
+    <h1>NASDAQ100・S&amp;P500構成銘柄のPEGスクリーニング結果を、定期メールでチェック</h1>
     <p class="trust-line">🔒 メールはレポート配信にのみ使用・スパムなし・
     <a href="?about=1">いつでも1クリックで完全削除</a>できます。</p>
 
@@ -534,7 +535,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
 
     <details>
       <summary>くわしい選定方法・注意事項</summary>
-      <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
+      <p>NASDAQ100またはS&amp;P500構成銘柄（登録後にいつでも切り替え可能）の中から、
+      <strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
       低い成長株を選定します。登録した銘柄については、トレンド・モメンタム・
       出来高の3種類のシグナルを定期的に監視して通知します。</p>
       <p class="muted">※配信の頻度は選んだ判定期間モードによって変わります
@@ -655,7 +657,8 @@ def _render_about(lang: str = LANG_JA) -> str:
         <h3>About</h3>
         <p>PegSignal is <strong>developed and operated by a single individual</strong>, not a
         company. Planning, development, and operations are all handled by one person.</p>
-        <p>It's a free service that picks NASDAQ100 growth stocks ranked by PEG ratio
+        <p>It's a free service that picks NASDAQ100 or S&amp;P 500 growth stocks (your choice)
+        ranked by PEG ratio
         and emails you signals. See
         <a href="?info=1">how it works</a> for the logic details.</p>
 
@@ -675,7 +678,8 @@ def _render_about(lang: str = LANG_JA) -> str:
     <h3>運営者情報</h3>
     <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
     です。法人ではなく、企画・開発・運用のすべてを個人で行っています。</p>
-    <p>NASDAQ100構成銘柄からPEGレシオが低い成長株を選定し、シグナルをメール配信する
+    <p>NASDAQ100またはS&amp;P500構成銘柄（選択制）からPEGレシオが低い成長株を選定し、
+    シグナルをメール配信する
     無料サービスです。判定ロジックの詳細は<a href="?info=1">この仕組みについて</a>を
     ご覧ください。</p>
 
@@ -961,6 +965,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
     mode = get_period_mode(token)
+    universe_preset = UNIVERSES[get_universe(token)]
 
     if lang == LANG_EN:
         rows_en = []
@@ -990,7 +995,8 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
         <details open>
           <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
-          <p>Universe: NASDAQ100 constituents (fetched from NASDAQ's official API). Only stocks
+          <p>Universe: <strong>{universe_preset['label_en']}</strong> constituents (you can change
+          this under "Index universe" on the main screen). Only stocks
           meeting both conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
           <ul>
@@ -1060,7 +1066,8 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
     <details open>
       <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
-      <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）。次の条件を両方満たす
+      <p>対象: <strong>{universe_preset['label']}</strong>構成銘柄（メイン画面の「対象指数」から
+      変更できます）。次の条件を両方満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
         <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
@@ -1215,7 +1222,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p class="fig-cap">Sign up with your email, choose the stocks you care about,
         and reports arrive automatically.</p>
         <p>PegSignal looks at the 100 largest non-financial companies on the NASDAQ
-        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on), ranks them by
+        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on) — or, if you prefer,
+        the broader S&amp;P 500 (switchable anytime on the main screen) — ranks them by
         <strong>PEG ratio — price relative to how fast they're growing</strong>, and emails
         you the list. It also watches the specific stocks you pick and tells you when
         something changes.</p>
@@ -1224,7 +1232,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <div class="guide-card">
           <span class="tag">📈 Selection report</span>
           <h4>"Here are today's top picks by PEG ratio"</h4>
-          <p>A ranked list picked automatically from all NASDAQ100 stocks. You don't have to
+          <p>A ranked list picked automatically from your chosen index (NASDAQ100 or
+          S&amp;P 500). You don't have to
           set anything up — this arrives on its own.</p>
         </div>
         <div class="guide-card">
@@ -1309,7 +1318,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p class="fig-cap">メールアドレスを登録し、気になる銘柄を選ぶだけ。
     あとは自動でレポートが届きます。</p>
     <p>PegSignalは、米国NASDAQ市場の代表的な100社（「NASDAQ100」。Apple・Microsoft・
-    NVIDIAなど）の中から、<strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
+    NVIDIAなど）、またはより広い「S&amp;P500」（メイン画面からいつでも切替可能）の中から、
+    <strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
     自動でランキングしてメールでお知らせします。さらに、あなたが選んだ銘柄については
     値動きを見張って、変化があればお知らせします。</p>
 
@@ -1317,8 +1327,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <div class="guide-card">
       <span class="tag">📈 選定レポート</span>
       <h4>「今、PEGレシオが低い成長株はこれです」</h4>
-      <p>NASDAQ100の全銘柄から自動で選んだランキングです。何も設定しなくても
-      勝手に届きます。</p>
+      <p>選んでいる対象指数（NASDAQ100またはS&amp;P500）の全銘柄から自動で選んだ
+      ランキングです。何も設定しなくても勝手に届きます。</p>
     </div>
     <div class="guide-card">
       <span class="tag blue">📊 監視レポート</span>
