@@ -468,10 +468,13 @@ def _dispatch(event: dict) -> dict:
     # サンドボックス開発環境からはWikipediaへの通信もブロックされているため、
     # 実際に外部通信できるdaily-batch-dev上でのみ検証できる。読み取りのみ。
     if event.get("_test_fetch_sp500"):
+        from collections import Counter
         from data_sources import get_sp500_tickers
         tickers = get_sp500_tickers()
+        dups = {t: c for t, c in Counter(tickers).items() if c > 1}
         return {"statusCode": 200, "body": {
-            "count": len(tickers), "sample": tickers[:10], "has_dup": len(tickers) != len(set(tickers)),
+            "count": len(tickers), "sample": tickers[:10],
+            "unique_count": len(set(tickers)), "duplicates": dups,
         }}
 
     owner_token = event.get("owner_token")
