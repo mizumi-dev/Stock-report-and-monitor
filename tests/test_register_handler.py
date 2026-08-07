@@ -255,6 +255,29 @@ class TestAccessRecoveryHint:
         assert "アクセス用リンクを再送します" in r["body"]
 
 
+class TestPreviewLink:
+    """メール登録不要で選定レポートを見られるlanding-previewへのリンク。
+    PREVIEW_URL未設定(devの初期状態等)ではリンク自体を出さない(壊れたリンクを
+    出さないための既存パターンと同じ方針)。"""
+
+    def test_preview_link_shown_when_url_configured(self, rh):
+        rh.PREVIEW_URL = "https://preview.pegsignal.com/"
+        r = rh.handler(_event(), None)
+        assert 'href="https://preview.pegsignal.com/"' in r["body"]
+        assert "登録せずに" in r["body"]
+
+    def test_preview_link_omitted_when_url_not_configured(self, rh):
+        rh.PREVIEW_URL = ""
+        r = rh.handler(_event(), None)
+        assert "登録せずに" not in r["body"]
+
+    def test_preview_link_shown_in_english(self, rh):
+        rh.PREVIEW_URL = "https://preview.pegsignal.com/"
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}), None)
+        assert 'href="https://preview.pegsignal.com/"' in r["body"]
+        assert "without signing up" in r["body"]
+
+
 class TestLanguage:
     def test_signup_form_defaults_to_japanese_without_header(self, rh):
         r = rh.handler(_event(), None)
