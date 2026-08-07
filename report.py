@@ -8,7 +8,7 @@ lang="ja"(既定)なら従来通り日本語、lang="en"なら英語版を生成
 テンプレートを共有せず素直にja/enを別々に書いているが、単純な文言の
 出し分け(見出し・ラベル・凡例等)はすべて下のT辞書 + t()に集約している。
 """
-from config import PERIOD_PRESETS
+from config import PERIOD_PRESETS, get_universe_preset
 
 LANG_JA = "ja"
 LANG_EN = "en"
@@ -103,6 +103,17 @@ def _mode_note(mode: str, lang: str) -> str:
     if not label:
         return ""
     text = f"Time horizon: {label}" if lang == LANG_EN else f"判定期間: {label}モード"
+    return f'<p style="color:#888;font-size:12px;">{text}</p>'
+
+
+def _universe_note(universe: str, lang: str) -> str:
+    """選定レポートがどの指数を対象にスキャンしたかを明記する(S&P500対応、2026-08-07)。
+    universe未指定(監視レポート等、選定と無関係な呼び出し)では何も表示しない。"""
+    if not universe:
+        return ""
+    preset = get_universe_preset(universe)
+    label = preset["label_en"] if lang == LANG_EN else preset["label"]
+    text = f"Universe: {label}" if lang == LANG_EN else f"対象指数: {label}"
     return f'<p style="color:#888;font-size:12px;">{text}</p>'
 
 
@@ -321,9 +332,11 @@ def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_
 
 def build_selection_report(ranked: list[dict], signals_map: dict, register_base_url: str,
                            register_token: str, mode: str = "", lang: str = LANG_JA,
-                           as_of: str | None = None) -> str:
+                           as_of: str | None = None, universe: str = "") -> str:
     """選定（PEGスクリーニング）レポート・週次。as_ofを渡すと「◯月◯日時点のデータです」の
-    注記を末尾に付ける(レポート即時発行ボタンが保存済みスナップショットを送る際に使う)。"""
+    注記を末尾に付ける(レポート即時発行ボタンが保存済みスナップショットを送る際に使う)。
+    universeを渡すと対象指数(NASDAQ100/S&P500)を明記する注記を付ける(省略時は非表示、
+    既存呼び出し・監視レポートとの互換のため)。"""
     register_form_url = f"{register_base_url}?token={register_token}"
     body_rows = render_selection_cards(ranked, signals_map, register_base_url, lang, register_token)
 
@@ -331,6 +344,7 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
     <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
       <h2>{selection_subject(mode, lang)}</h2>
       {_mode_note(mode, lang)}
+      {_universe_note(universe, lang)}
       {body_rows}
       <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
       {_guide_link(register_base_url, lang)}

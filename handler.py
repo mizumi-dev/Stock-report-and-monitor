@@ -18,19 +18,21 @@ from decimal import Decimal
 
 from config import (
     DEFAULT_PERIOD_MODE,
+    DEFAULT_UNIVERSE,
     FETCH_MAX_WORKERS,
     MIN_FETCH_SUCCESS_RATIO,
-    NASDAQ100_CACHE_KEY,
-    PERIOD_MODE_KEY,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
     get_preset,
     normalize_mode,
+    normalize_universe,
     selection_snapshot_key,
     signal_history_date_key,
+    universe_cache_key,
     user_period_mode_key,
+    user_universe_key,
 )
-from data_sources import get_nasdaq100_tickers, get_stock_data
+from data_sources import get_nasdaq100_tickers, get_sp500_tickers, get_stock_data
 from mailer import ResendMailer
 from signals import calc_all_signals
 from ranking import rank_stocks
@@ -85,12 +87,25 @@ def get_user_period_mode(owner_token: str) -> str:
         return DEFAULT_PERIOD_MODE
 
 
-def get_cached_tickers() -> list[str] | None:
-    """前回成功時に保存したNASDAQ100構成銘柄リスト。Nasdaq API障害時のフォールバック用。
-    利用者に依存しない共有データなのでキーはそのまま。"""
+def get_user_universe(owner_token: str) -> str:
+    """利用者が画面で選んだ対象指数(ユニバース)を読む。未設定・取得失敗時は既定
+    (NASDAQ100)で動かす(設定が読めないだけでレポート全体を止める必要はないため、
+    get_user_period_modeと同じ方針)。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
+        resp = table.get_item(Key={"key": user_universe_key(owner_token)})
+        return normalize_universe(resp.get("Item", {}).get("value"))
+    except Exception as e:
+        print(f"[WARN] ユニバースの取得に失敗、既定値({DEFAULT_UNIVERSE})を使用: {e}")
+        return DEFAULT_UNIVERSE
+
+
+def get_cached_tickers(universe: str = DEFAULT_UNIVERSE) -> list[str] | None:
+    """前回成功時に保存した構成銘柄リスト(ユニバースごと)。Nasdaq API/Wikipedia
+    障害時のフォールバック用。利用者に依存しない共有データなのでキーはそのまま。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": universe_cache_key(universe)})
         tickers = resp.get("Item", {}).get("value")
         return list(tickers) if tickers else None
     except Exception as e:
@@ -98,11 +113,11 @@ def get_cached_tickers() -> list[str] | None:
         return None
 
 
-def save_cached_tickers(tickers: list[str]):
+def save_cached_tickers(universe: str, tickers: list[str]):
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
         table.put_item(Item={
-            "key": NASDAQ100_CACHE_KEY,
+            "key": universe_cache_key(universe),
             "value": tickers,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         })
@@ -180,9 +195,10 @@ def send_email(subject: str, html_body: str, to_address: str):
 _SELECTION_CACHE_FIELDS = ("ticker", "company_name", "peg", "earnings_growth", "market_cap")
 
 
-def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict):
-    """選定レポートのランキング+シグナルをモードごとに保存する。レポート即時発行
-    ボタンはこれを読むだけで新規スキャンを行わない(定時実行結果と常に一致させ、
+def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict,
+                            universe: str = DEFAULT_UNIVERSE):
+    """選定レポートのランキング+シグナルを(モード,ユニバース)ごとに保存する。レポート
+    即時発行ボタンはこれを読むだけで新規スキャンを行わない(定時実行結果と常に一致させ、
     ボタン連打によるコスト増を防ぐため)。signals_mapはランキングに載る銘柄分だけに
     刈り込んでから保存する(全銘柄分は不要で、無駄にDynamoDBの項目サイズを使うため)。"""
     cacheable_ranked = [{k: s.get(k) for k in _SELECTION_CACHE_FIELDS} for s in ranked]
@@ -190,7 +206,7 @@ def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict):
     trimmed_signals = {t: signals_map[t] for t in tickers if t in signals_map}
     table = dynamodb.Table(SETTINGS_TABLE)
     table.put_item(Item={
-        "key": selection_snapshot_key(mode),
+        "key": selection_snapshot_key(mode, universe),
         "ranked": _to_dynamodb_safe(cacheable_ranked),
         "signals_map": _to_dynamodb_safe(trimmed_signals),
         "as_of_date": _today_str(),
@@ -198,12 +214,12 @@ def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict):
     })
 
 
-def get_selection_snapshot(mode: str) -> dict | None:
+def get_selection_snapshot(mode: str, universe: str = DEFAULT_UNIVERSE) -> dict | None:
     """レポート即時発行ボタン用。保存済みスナップショットが無ければNone
-    (サービス開始直後など、そのモードでまだ一度もバッチが走っていない場合)。"""
+    (サービス開始直後など、その(モード,ユニバース)でまだ一度もバッチが走っていない場合)。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": selection_snapshot_key(mode)})
+        resp = table.get_item(Key={"key": selection_snapshot_key(mode, universe)})
         item = resp.get("Item")
         if not item or "ranked" not in item:
             return None
@@ -214,16 +230,21 @@ def get_selection_snapshot(mode: str) -> dict | None:
         return None
 
 
-def _scan_universe(mode: str) -> tuple[list, dict]:
-    """NASDAQ100全銘柄をスキャンし、ランキングと全銘柄分のシグナルを返す。
-    利用者ごとではなく、同じモードを使う利用者全員で使い回す(スキャンが重いため)。
-    結果はそのままそのモードの「本日のスナップショット」として保存する
-    (定時実行・即時発行ボタンのフォールバック、いずれから呼ばれても同じ扱いにする)。"""
+def _scan_universe(mode: str, universe: str = DEFAULT_UNIVERSE) -> tuple[list, dict]:
+    """対象指数(NASDAQ100またはS&P500)全銘柄をスキャンし、ランキングと全銘柄分の
+    シグナルを返す。利用者ごとではなく、同じ(モード,ユニバース)の組み合わせを使う
+    利用者全員で使い回す(スキャンが重いため)。結果はそのままその組み合わせの
+    「本日のスナップショット」として保存する(定時実行・即時発行ボタンのフォールバック、
+    いずれから呼ばれても同じ扱いにする)。"""
     preset = get_preset(mode)
+    universe = normalize_universe(universe)
 
-    cached = get_cached_tickers()
-    tickers = get_nasdaq100_tickers(fallback=cached)
-    save_cached_tickers(tickers)
+    cached = get_cached_tickers(universe)
+    if universe == "SP500":
+        tickers = get_sp500_tickers(fallback=cached)
+    else:
+        tickers = get_nasdaq100_tickers(fallback=cached)
+    save_cached_tickers(universe, tickers)
 
     # I/O待ちが支配的な逐次取得がボトルネックのため並列化する。非公式APIへの
     # 負荷を抑えるため全並列ではなくFETCH_MAX_WORKERSで頭打ちにする。
@@ -249,43 +270,46 @@ def _scan_universe(mode: str) -> tuple[list, dict]:
         )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
-    save_selection_snapshot(mode, ranked, signals_map)
+    save_selection_snapshot(mode, ranked, signals_map, universe)
     return ranked, signals_map
 
 
 def run_selection_reports(users: list[dict]):
-    """usersに含まれる利用者全員へ選定レポートを送る(定時実行用)。モードごとに
-    1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。"""
-    by_mode: dict[str, list[dict]] = {}
+    """usersに含まれる利用者全員へ選定レポートを送る(定時実行用)。(モード,ユニバース)の
+    組み合わせごとに1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。"""
+    by_key: dict[tuple[str, str], list[dict]] = {}
     for u in users:
         mode = get_user_period_mode(u["token"])
-        by_mode.setdefault(mode, []).append(u)
+        universe = get_user_universe(u["token"])
+        by_key.setdefault((mode, universe), []).append(u)
 
-    for mode, group in by_mode.items():
-        ranked, signals_map = _scan_universe(mode)
+    for (mode, universe), group in by_key.items():
+        ranked, signals_map = _scan_universe(mode, universe)
         for u in group:
             lang = u.get("lang") or "ja"
             body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode,
-                                          lang=lang, as_of=_today_str())
+                                          lang=lang, as_of=_today_str(), universe=universe)
             subject = selection_subject(mode, lang)
             send_email(subject, body, u["email"])
 
 
 def send_selection_report_now(user: dict):
     """レポート即時発行ボタン用。保存済みスナップショットを読んで送るだけで、
-    新規スキャンは行わない(そのモードで一度もバッチが走っていない場合のみ、
+    新規スキャンは行わない(その(モード,ユニバース)で一度もバッチが走っていない場合のみ、
     その場で1回スキャンする)。"""
     mode = get_user_period_mode(user["token"])
-    snapshot = get_selection_snapshot(mode)
+    universe = get_user_universe(user["token"])
+    snapshot = get_selection_snapshot(mode, universe)
     if snapshot is None:
-        ranked, signals_map = _scan_universe(mode)  # 内部でスナップショットも保存される
+        ranked, signals_map = _scan_universe(mode, universe)  # 内部でスナップショットも保存される
         as_of = _today_str()
     else:
         ranked, signals_map = snapshot["ranked"], snapshot["signals_map"]
         as_of = snapshot["as_of_date"]
 
     lang = user.get("lang") or "ja"
-    body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang, as_of=as_of)
+    body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang,
+                                  as_of=as_of, universe=universe)
     subject = selection_subject(mode, lang)
     send_email(subject, body, user["email"])
 

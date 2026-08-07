@@ -202,6 +202,51 @@ class TestTickerValidation:
         assert r["statusCode"] == 200
         assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
 
+    def test_ticker_accepted_from_any_universe_regardless_of_selection(self, rh):
+        """_is_known_tickerは「打ち間違いの検出」であって「対象指数による絞り込み」
+        ではないため、対応する全指数のいずれかに含まれていれば登録できる。
+        監視レポートは対象指数に依存しないので、S&P500を選びつつNASDAQ100固有の
+        銘柄を監視したいケースは正当(S&P500対応、2026-08-07)。"""
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "PDD"]})
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "sp500_tickers_cache", "value": ["NVDA", "KO"]})
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+
+        # 選択中はS&P500だが、NASDAQ100固有の銘柄(PDD)も登録できる
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="PDD"), None)
+        assert r["statusCode"] == 200
+        # S&P500固有の銘柄(KO)ももちろん登録できる
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="KO"), None)
+        assert r["statusCode"] == 200
+        assert {i["ticker"] for i in rh.dynamodb.Table("watchlist").scan()["Items"]} == {"PDD", "KO"}
+
+    def test_ticker_in_no_universe_still_rejected(self, rh):
+        """どの指数にも無いティッカーは従来どおり拒否する(打ち間違い検出は機能させる)"""
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "PDD"]})
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "sp500_tickers_cache", "value": ["NVDA", "KO"]})
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="ZZZZZ"), None)
+        assert r["statusCode"] == 400
+        assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
+
+    def test_watchlist_entry_survives_universe_switch_and_can_be_readded(self, rh):
+        """指数を切り替えても既存の監視銘柄は残る。かつ、一度削除しても再登録できる
+        (「残るのに消すと二度と登録できない」という一貫性のない状態を防ぐ回帰テスト)"""
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["PDD"]})
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "sp500_tickers_cache", "value": ["KO"]})
+        rh.handler(_event(token=VALID_TOKEN, ticker="PDD"), None)
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert [i["ticker"] for i in rh.dynamodb.Table("watchlist").scan()["Items"]] == ["PDD"]
+
+        rh.handler(_event(token=VALID_TOKEN, ticker="PDD", action="delete"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="PDD"), None)
+        assert r["statusCode"] == 200
+        assert [i["ticker"] for i in rh.dynamodb.Table("watchlist").scan()["Items"]] == ["PDD"]
+
 
 class TestAccessRecoveryHint:
     def test_signup_form_mentions_resend_on_lost_link(self, rh):
@@ -374,6 +419,27 @@ class TestLanguageConsistency:
             body = _visible(rh.handler(_event(_headers={"x-site-lang": "en"}, **params), None)["body"])
             found = re.findall(r"[ぁ-んァ-ン一-龥]+", body)
             assert not found, f"英語ページ {params or 'トップ'} に日本語が残っている: {found}"
+
+    NOTICE_RE = re.compile(
+        r'<p (?:class="notice"|style="background:#eef;padding:8px;border-radius:4px;")>(.*?)</p>'
+    )
+
+    def test_report_accepted_notice_shows_approximate_arrival_time_ja(self, rh):
+        """レポート送信ボタン押下時の通知に、メイン画面の案内文言(既存)と同じ
+        「メール到着まで1分ほど」という目安時間を表示する(ユーザー要望)。
+        同じ文言がボタン付近の静的な案内文にも既に存在するため、ページ全体では
+        なく通知(_render_formのnotice枠)の中身だけを見て検証する"""
+        r = rh.handler(_event(token=VALID_TOKEN, report="selection"), None)
+        notice = self.NOTICE_RE.search(r["body"])
+        assert notice is not None
+        assert "メール到着まで1分ほどかかります" in notice.group(1)
+
+    def test_report_accepted_notice_shows_approximate_arrival_time_en(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, report="monitoring"), None)
+        notice = self.NOTICE_RE.search(r["body"])
+        assert notice is not None
+        assert "within a minute or so" in notice.group(1)
 
     def test_report_send_failure_page_is_fully_english(self, rh):
         rh.handler(_event(token=VALID_TOKEN, lang="en"), None)
@@ -700,6 +766,53 @@ class TestPeriodMode:
             Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
         rh.handler(_event(token=VALID_TOKEN, mode="SHORT"), None)
         assert rh.get_period_mode("other-tok") == "MID"  # 他人のモード変更は影響しない
+
+
+class TestUniverse:
+    """対象指数(ユニバース、NASDAQ100/S&P500)の切替。period_modeと全く同じ
+    仕組み(app_settings + プリセット辞書)で実装しているため、テストも
+    TestPeriodModeと対になるように揃えている(S&P500対応、2026-08-07)。"""
+
+    def test_universe_switch_persists(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert rh.get_universe(VALID_TOKEN) == "SP500"
+        rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100"), None)
+        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"
+
+    def test_unknown_universe_falls_back_to_default(self, rh):
+        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"  # 未設定時はDEFAULT_UNIVERSE
+
+    def test_universe_is_isolated_per_user(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert rh.get_universe("other-tok") == "NASDAQ100"  # 他人のユニバース変更は影響しない
+
+    def test_universe_change_notice_shows_new_universe_label(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert "対象指数を「S&P500」に変更しました" in r["body"]
+
+
+class TestInfoPageUniverseWording:
+    """?info=1はトップページからトークン無しでも辿れる(申込み前の判断材料)。
+    未登録の訪問者に特定の指数を断定すると「NASDAQ100専用サービス」だと
+    誤解され、「メイン画面で変更できます」と言っても意味が通らない。"""
+
+    def test_info_page_without_token_does_not_assert_a_single_universe(self, rh):
+        r = rh.handler(_event(info="1"), None)
+        assert "NASDAQ100またはS&P500</strong>構成銘柄" in r["body"]
+        assert "メイン画面の「対象指数」から変更できます" not in r["body"]
+
+    def test_info_page_with_token_shows_the_users_own_universe(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, info="1"), None)
+        assert "S&P500</strong>構成銘柄" in r["body"]
+        assert "メイン画面の「対象指数」から変更できます" in r["body"]
+
+    def test_info_page_without_token_is_generic_in_english(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "en"}, info="1"), None)
+        assert "NASDAQ100 or S&P 500</strong> constituents" in r["body"]
+        assert "on the main screen" not in r["body"]
 
 
 class TestInfoPagesLanguage:

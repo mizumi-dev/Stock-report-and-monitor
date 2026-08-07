@@ -25,14 +25,17 @@ from datetime import datetime, timezone
 from config import (
     MAX_PEG,
     MIN_GROWTH,
-    NASDAQ100_CACHE_KEY,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
     TOKEN_STATUS_PENDING,
+    UNIVERSES,
     get_preset,
     normalize_mode,
+    normalize_universe,
+    universe_cache_key,
     user_period_mode_key,
+    user_universe_key,
 )
 from mailer import ResendMailer
 
@@ -117,16 +120,16 @@ _ICON_DATA_URI = "data:image/svg+xml;base64," + base64.b64encode(_ICON_SVG.encod
 
 
 _SITE_TITLE = {
-    LANG_JA: "PegSignal（株式レポートサービス） | NASDAQ100 成長株シグナル配信",
-    LANG_EN: "PegSignal | NASDAQ100 growth-stock signal alerts",
+    LANG_JA: "PegSignal（株式レポートサービス） | NASDAQ100・S&P500 成長株シグナル配信",
+    LANG_EN: "PegSignal | NASDAQ100 / S&P 500 growth-stock signal alerts",
 }
 _SITE_DESCRIPTION = {
     LANG_JA: (
-        "PEGレシオが低い成長株をNASDAQ100構成銘柄から選定し、"
+        "PEGレシオが低い成長株をNASDAQ100・S&P500構成銘柄から選定し、"
         "トレンド・モメンタム・出来高のシグナルを定期メールで通知する無料サービスです。"
     ),
     LANG_EN: (
-        "A free service that screens NASDAQ100 constituents for growth stocks with a low "
+        "A free service that screens NASDAQ100 / S&P 500 constituents for growth stocks with a low "
         "PEG ratio and emails you trend, momentum, and volume signals on a regular schedule."
     ),
 }
@@ -337,17 +340,31 @@ def _current_watchlist(owner_token: str) -> list[str]:
 
 
 def _is_known_ticker(ticker: str) -> bool:
-    """daily-batchが保存するNASDAQ100構成銘柄キャッシュと突き合わせ、
-    実在しない/打ち間違えたティッカーの登録を防ぐ(TODO#13)。
-    キャッシュ自体が未生成・読み取り失敗の場合は、正しい銘柄の登録を
+    """daily-batchが保存する構成銘柄キャッシュと突き合わせ、実在しない/打ち間違えた
+    ティッカーの登録を防ぐ(TODO#13)。
+
+    これは「打ち間違いの検出」であって「対象指数による絞り込み」ではないため、
+    対応する全ユニバースのキャッシュのいずれかに含まれていれば許可する。
+    監視レポートは対象指数に依存せず「利用者が明示的に選んだ銘柄」を見張る機能
+    なので、選択中の指数の外にある銘柄を監視したいケースは正当
+    (例: 対象指数はS&P500にしつつ、NASDAQ100固有のPDDも監視し続けたい)。
+    選択中の指数だけで判定すると、指数を切り替えた利用者が「既存の監視銘柄は
+    残るのに、消すと二度と登録できない」という一貫性のない状態に陥る。
+
+    キャッシュが1つも無い/読み取り失敗の場合は、正しい銘柄の登録を
     誤ってブロックしないよう許可する(fail-open)"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
-        known = resp.get("Item", {}).get("value")
-        if not known:
-            return True
-        return ticker in known
+        has_any_cache = False
+        for universe in UNIVERSES:
+            resp = table.get_item(Key={"key": universe_cache_key(universe)})
+            known = resp.get("Item", {}).get("value")
+            if not known:
+                continue
+            has_any_cache = True
+            if ticker in known:
+                return True
+        return not has_any_cache
     except Exception as e:
         print(f"[WARN] 銘柄キャッシュの確認に失敗、登録は許可: {e}")
         return True
@@ -370,6 +387,26 @@ def set_period_mode(owner_token: str, mode: str) -> str:
     table.put_item(Item={"key": user_period_mode_key(owner_token), "value": mode,
                          "updated_at": datetime.now(timezone.utc).isoformat()})
     return mode
+
+
+def get_universe(owner_token: str) -> str:
+    """利用者が選んだ対象指数(ユニバース)。get_period_modeと同じ方針で、
+    設定が読めなくても画面は出したいので失敗時は既定(NASDAQ100)扱いにする。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": user_universe_key(owner_token)})
+        return normalize_universe(resp.get("Item", {}).get("value"))
+    except Exception as e:
+        print(f"[WARN] ユニバース取得に失敗: {e}")
+        return normalize_universe(None)
+
+
+def set_universe(owner_token: str, universe: str) -> str:
+    universe = normalize_universe(universe)
+    table = dynamodb.Table(SETTINGS_TABLE)
+    table.put_item(Item={"key": user_universe_key(owner_token), "value": universe,
+                         "updated_at": datetime.now(timezone.utc).isoformat()})
+    return universe
 
 
 def _trigger_report(report: str, owner_token: str):
@@ -421,7 +458,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
         return f"""
         {notice_html}
         <p class="eyebrow">PegSignal (free, indie-built)</p>
-        <h1>NASDAQ100 growth stocks, ranked by PEG, delivered on a schedule</h1>
+        <h1>NASDAQ100 / S&amp;P 500 growth stocks, ranked by PEG, delivered on a schedule</h1>
         <p class="trust-line">🔒 Your email is used only for report delivery, no spam.
         <a href="?about=1">Delete your data anytime, one click.</a></p>
 
@@ -448,7 +485,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
 
         <details>
           <summary>How stocks are picked, and important notes</summary>
-          <p>We screen NASDAQ100 constituents for growth stocks with a low
+          <p>We screen NASDAQ100 or S&amp;P 500 constituents (your choice, switchable anytime)
+          for growth stocks with a low
           <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
           we monitor trend, momentum, and volume signals on a regular schedule.</p>
           <p class="muted">How often you hear from us depends on the time horizon you pick
@@ -483,7 +521,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     return f"""
     {notice_html}
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
-    <h1>NASDAQ100構成銘柄のPEGスクリーニング結果を、定期メールでチェック</h1>
+    <h1>NASDAQ100・S&amp;P500構成銘柄のPEGスクリーニング結果を、定期メールでチェック</h1>
     <p class="trust-line">🔒 メールはレポート配信にのみ使用・スパムなし・
     <a href="?about=1">いつでも1クリックで完全削除</a>できます。</p>
 
@@ -510,7 +548,8 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
 
     <details>
       <summary>くわしい選定方法・注意事項</summary>
-      <p>NASDAQ100構成銘柄の中から、<strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
+      <p>NASDAQ100またはS&amp;P500構成銘柄（登録後にいつでも切り替え可能）の中から、
+      <strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
       低い成長株を選定します。登録した銘柄については、トレンド・モメンタム・
       出来高の3種類のシグナルを定期的に監視して通知します。</p>
       <p class="muted">※配信の頻度は選んだ判定期間モードによって変わります
@@ -631,7 +670,8 @@ def _render_about(lang: str = LANG_JA) -> str:
         <h3>About</h3>
         <p>PegSignal is <strong>developed and operated by a single individual</strong>, not a
         company. Planning, development, and operations are all handled by one person.</p>
-        <p>It's a free service that picks NASDAQ100 growth stocks ranked by PEG ratio
+        <p>It's a free service that picks NASDAQ100 or S&amp;P 500 growth stocks (your choice)
+        ranked by PEG ratio
         and emails you signals. See
         <a href="?info=1">how it works</a> for the logic details.</p>
 
@@ -651,7 +691,8 @@ def _render_about(lang: str = LANG_JA) -> str:
     <h3>運営者情報</h3>
     <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
     です。法人ではなく、企画・開発・運用のすべてを個人で行っています。</p>
-    <p>NASDAQ100構成銘柄からPEGレシオが低い成長株を選定し、シグナルをメール配信する
+    <p>NASDAQ100またはS&amp;P500構成銘柄（選択制）からPEGレシオが低い成長株を選定し、
+    シグナルをメール配信する
     無料サービスです。判定ロジックの詳細は<a href="?info=1">この仕組みについて</a>を
     ご覧ください。</p>
 
@@ -726,6 +767,8 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
     watchlist = _current_watchlist(token)
     mode = get_period_mode(token)
     preset = get_preset(mode)
+    universe = get_universe(token)
+    universe_preset = UNIVERSES[universe]
 
     if lang == LANG_EN:
         delete_label = "delete"
@@ -745,6 +788,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
             for k in PERIOD_PRESETS
         )
         preset_en = PERIOD_PRESETS[mode]
+        universe_options = "".join(
+            f'<option value="{k}"{" selected" if k == universe else ""}>{p["label_en"]}</option>'
+            for k, p in UNIVERSES.items()
+        )
         notice_html = f'<p class="notice">{notice}</p>' if notice else ""
         lang_switch = (
             f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
@@ -769,6 +816,18 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           <button type="submit" style="padding:8px 16px;">Change</button>
         </form>
         <p style="color:#888;font-size:12px;">Current: <strong>{preset_en['label_en']}</strong> — {preset_en['description_en']}</p>
+
+        <hr style="margin:24px 0;">
+        <h3>Index universe</h3>
+        <form method="GET">
+          <input type="hidden" name="token" value="{t}">
+          <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
+          <button type="submit" style="padding:8px 16px;">Change</button>
+        </form>
+        <p style="color:#888;font-size:12px;">
+          Current: <strong>{universe_preset['label_en']}</strong> — this only changes which index the
+          <strong>selection report</strong> ranks. Your watchlist is unaffected: you can track any
+          stock from either index, whichever you pick here.</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -800,6 +859,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
         f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
         for k, p in PERIOD_PRESETS.items()
     )
+    universe_options = "".join(
+        f'<option value="{k}"{" selected" if k == universe else ""}>{p["label"]}</option>'
+        for k, p in UNIVERSES.items()
+    )
 
     notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
 
@@ -822,6 +885,18 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
       <button type="submit" style="padding:8px 16px;">変更</button>
     </form>
     <p style="color:#888;font-size:12px;">現在: <strong>{preset['label']}</strong> — {preset['description']}</p>
+
+    <hr style="margin:24px 0;">
+    <h3>対象指数</h3>
+    <form method="GET">
+      <input type="hidden" name="token" value="{t}">
+      <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
+      <button type="submit" style="padding:8px 16px;">変更</button>
+    </form>
+    <p style="color:#888;font-size:12px;">
+      現在: <strong>{universe_preset['label']}</strong> — ここで変わるのは
+      <strong>選定レポート</strong>がどの指数からランキングするかだけです。
+      監視リストには影響しません（どちらを選んでも、両方の指数の銘柄を登録・監視できます）。</p>
 
     <hr style="margin:24px 0;">
     <h3>レポートを今すぐ送信</h3>
@@ -905,6 +980,29 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     """説明ページ。数値は config.py の実際の設定から生成するので実装とズレない"""
     t = html.escape(token)
     mode = get_period_mode(token)
+    # このページはトップページからトークン無しでも辿れる(申込み前の判断材料)。
+    # 未登録の訪問者には「メイン画面で変更できます」と言っても意味が通らず、
+    # 特定の指数を断定するとNASDAQ100専用サービスだと誤解されるため、
+    # 登録済み(トークンあり)かどうかで書き分ける
+    if token:
+        universe_preset = UNIVERSES[get_universe(token)]
+        universe_note = (
+            f"<strong>{universe_preset['label_en']}</strong> constituents "
+            f'(you can change this under "Index universe" on the main screen)'
+            if lang == LANG_EN else
+            f"<strong>{universe_preset['label']}</strong>構成銘柄"
+            f"（メイン画面の「対象指数」から変更できます）"
+        )
+    else:
+        labels = " or ".join(p["label_en"] for p in UNIVERSES.values())
+        labels_ja = "または".join(p["label"] for p in UNIVERSES.values())
+        universe_note = (
+            f"<strong>{labels}</strong> constituents "
+            f"(you choose which one after signing up, and can switch anytime)"
+            if lang == LANG_EN else
+            f"<strong>{labels_ja}</strong>構成銘柄"
+            f"（登録後にどちらかを選べます。いつでも切替可能）"
+        )
 
     if lang == LANG_EN:
         rows_en = []
@@ -934,7 +1032,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
         <details open>
           <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
-          <p>Universe: NASDAQ100 constituents (fetched from NASDAQ's official API). Only stocks
+          <p>Universe: {universe_note}. Only stocks
           meeting both conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
           <ul>
@@ -1004,7 +1102,7 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
     <details open>
       <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
-      <p>対象: NASDAQ100構成銘柄（NASDAQ公式APIから取得）。次の条件を両方満たす
+      <p>対象: {universe_note}。次の条件を両方満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
         <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
@@ -1159,7 +1257,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p class="fig-cap">Sign up with your email, choose the stocks you care about,
         and reports arrive automatically.</p>
         <p>PegSignal looks at the 100 largest non-financial companies on the NASDAQ
-        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on), ranks them by
+        (the "NASDAQ100" — Apple, Microsoft, NVIDIA and so on) — or, if you prefer,
+        the broader S&amp;P 500 (switchable anytime on the main screen) — ranks them by
         <strong>PEG ratio — price relative to how fast they're growing</strong>, and emails
         you the list. It also watches the specific stocks you pick and tells you when
         something changes.</p>
@@ -1168,7 +1267,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <div class="guide-card">
           <span class="tag">📈 Selection report</span>
           <h4>"Here are today's top picks by PEG ratio"</h4>
-          <p>A ranked list picked automatically from all NASDAQ100 stocks. You don't have to
+          <p>A ranked list picked automatically from your chosen index (NASDAQ100 or
+          S&amp;P 500). You don't have to
           set anything up — this arrives on its own.</p>
         </div>
         <div class="guide-card">
@@ -1209,7 +1309,22 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p class="muted">You can change this at any time from the main screen, and it takes
         effect from the next report.</p>
 
-        <h4>6. A typical week</h4>
+        <h4>6. Choosing your index</h4>
+        <div class="guide-card">
+          <span class="tag blue">NASDAQ100</span>
+          <p>The 100 largest non-financial companies on the NASDAQ — tech-heavy, and the
+          default. Fewer stocks, so the ranking moves less from week to week.</p>
+        </div>
+        <div class="guide-card">
+          <span class="tag">S&amp;P 500</span>
+          <p>500 large US companies across every sector, including finance, healthcare and
+          energy. A wider net, so you'll see names that never appear in the NASDAQ100 list.</p>
+        </div>
+        <p class="muted">This setting only changes which index the <strong>selection
+        report</strong> ranks. Your watchlist is unaffected — you can track stocks from either
+        index no matter which one you pick here.</p>
+
+        <h4>7. A typical week</h4>
         <div class="guide-card">
           <p><strong>①</strong> A selection report arrives. Something catches your eye.</p>
           <p><strong>②</strong> Tap "Add to watchlist" right inside the email.</p>
@@ -1253,7 +1368,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p class="fig-cap">メールアドレスを登録し、気になる銘柄を選ぶだけ。
     あとは自動でレポートが届きます。</p>
     <p>PegSignalは、米国NASDAQ市場の代表的な100社（「NASDAQ100」。Apple・Microsoft・
-    NVIDIAなど）の中から、<strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
+    NVIDIAなど）、またはより広い「S&amp;P500」（メイン画面からいつでも切替可能）の中から、
+    <strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
     自動でランキングしてメールでお知らせします。さらに、あなたが選んだ銘柄については
     値動きを見張って、変化があればお知らせします。</p>
 
@@ -1261,8 +1377,8 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <div class="guide-card">
       <span class="tag">📈 選定レポート</span>
       <h4>「今、PEGレシオが低い成長株はこれです」</h4>
-      <p>NASDAQ100の全銘柄から自動で選んだランキングです。何も設定しなくても
-      勝手に届きます。</p>
+      <p>選んでいる対象指数（NASDAQ100またはS&amp;P500）の全銘柄から自動で選んだ
+      ランキングです。何も設定しなくても勝手に届きます。</p>
     </div>
     <div class="guide-card">
       <span class="tag blue">📊 監視レポート</span>
@@ -1301,7 +1417,22 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     長期モードでは正常な状態です。</p>
     <p class="muted">メイン画面からいつでも変更でき、次回のレポートから反映されます。</p>
 
-    <h4>6. 使い方の流れ（例）</h4>
+    <h4>6. 対象指数の選び方</h4>
+    <div class="guide-card">
+      <span class="tag blue">NASDAQ100</span>
+      <p>NASDAQ市場の代表的な100社。ハイテク企業の比率が高く、これが初期設定です。
+      銘柄数が少ないぶん、ランキングの顔ぶれは週ごとに大きくは変わりません。</p>
+    </div>
+    <div class="guide-card">
+      <span class="tag">S&amp;P500</span>
+      <p>金融・ヘルスケア・エネルギーなど全業種を含む、米国の主要500社。対象が広いぶん、
+      NASDAQ100のランキングには決して出てこない銘柄も見られます。</p>
+    </div>
+    <p class="muted">この設定で変わるのは<strong>選定レポート</strong>がどの指数から
+    ランキングするかだけです。監視リストには影響しません（どちらを選んでも、両方の指数の
+    銘柄を登録・監視できます）。</p>
+
+    <h4>7. 使い方の流れ（例）</h4>
     <div class="guide-card">
       <p><strong>①</strong> 選定レポートが届く。気になる銘柄を見つける。</p>
       <p><strong>②</strong> メール内の「この銘柄を監視リストに登録」を押す。</p>
@@ -1598,6 +1729,8 @@ def _classify_route(params: dict) -> str:
         return "delete_account"
     if params.get("mode"):
         return "mode_change"
+    if params.get("universe"):
+        return "universe_change"
     if params.get("report") in ("selection", "monitoring"):
         return f"report_{params['report']}"
     if params.get("ticker"):
@@ -1745,6 +1878,16 @@ def handler(event, context):
                   else f"判定期間を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
+    # 対象指数(ユニバース)の変更。期間モードと全く同じ仕組み(app_settings +
+    # プリセット辞書)で実装している(S&P500対応、2026-08-07)
+    if params.get("universe"):
+        universe = set_universe(token, params["universe"])
+        preset = UNIVERSES[universe]
+        notice = (f'Universe changed to "{preset["label_en"]}". This applies from the next report.'
+                  if lang == LANG_EN
+                  else f"対象指数を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
+
     # レポートの即時送信(非同期起動)
     report = (params.get("report") or "").strip().lower()
     if report in ("selection", "monitoring"):
@@ -1762,8 +1905,10 @@ def handler(event, context):
                        else f"{label}レポートの送信に失敗しました: {html.escape(str(e))}")
             return _page(f"<p>{err_msg}</p>{_back_link(token, lang)}", status=500, lang=lang)
         _record_report_request(token)
-        notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email shortly." if lang == LANG_EN
-                  else f"{label}レポートの送信を受け付けました。まもなくメールが届きます。")
+        # 「メール到着まで1分ほど」はメイン画面のボタン付近の案内文言(既存)と表記を揃える
+        notice = (f"Your {label_en.lower()} report request was accepted. It'll arrive by email "
+                  f"within a minute or so." if lang == LANG_EN
+                  else f"{label}レポートの送信を受け付けました。メール到着まで1分ほどかかります。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     ticker = (params.get("ticker") or "").strip().upper()
@@ -1784,11 +1929,15 @@ def handler(event, context):
                   else f"{ticker} を監視リストから削除しました。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
+    # 対象指数に関わらず、対応している全指数の構成銘柄を登録できる(_is_known_ticker
+    # の判定は打ち間違い検出が目的で、対象指数の絞り込みではないため)
     if not _is_known_ticker(ticker):
+        known_labels = "・".join(p["label"] for p in UNIVERSES.values())
+        known_labels_en = " / ".join(p["label_en"] for p in UNIVERSES.values())
         notice = (f'Couldn\'t find a ticker called "{ticker}". Please check the symbol '
-                   f"against NASDAQ100 constituents and try again." if lang == LANG_EN
+                   f"against {known_labels_en} constituents and try again." if lang == LANG_EN
                   else f"「{ticker}」という銘柄は見つかりませんでした。"
-                       f"NASDAQ100構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
+                       f"{known_labels}構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
         return _page(_render_form(token, lang, notice=notice), status=400, lang=lang)
 
     watchlist = _current_watchlist(token)

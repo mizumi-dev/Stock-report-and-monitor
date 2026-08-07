@@ -14,9 +14,10 @@ def test_selection_reports_scan_once_per_distinct_mode(monkeypatch):
     users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com"), _user("tok-c", "c@example.com")]
     modes = {"tok-a": "SHORT", "tok-b": "SHORT", "tok-c": "LONG"}
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: modes[token])
+    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
 
     scan_calls = []
-    def fake_scan(mode):
+    def fake_scan(mode, universe):
         scan_calls.append(mode)
         return ([], {})
     monkeypatch.setattr(handler, "_scan_universe", fake_scan)
@@ -31,13 +32,35 @@ def test_selection_reports_scan_once_per_distinct_mode(monkeypatch):
     assert sorted(sent) == ["a@example.com", "b@example.com", "c@example.com"]
 
 
+def test_selection_reports_scan_once_per_distinct_mode_and_universe(monkeypatch):
+    """同じモードでもユニバース(対象指数)が異なる利用者同士はスキャンを共有しない
+    (S&P500対応、2026-08-07)。"""
+    users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com")]
+    monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "SHORT")
+    universes = {"tok-a": "NASDAQ100", "tok-b": "SP500"}
+    monkeypatch.setattr(handler, "get_user_universe", lambda token: universes[token])
+
+    scan_calls = []
+    def fake_scan(mode, universe):
+        scan_calls.append((mode, universe))
+        return ([], {})
+    monkeypatch.setattr(handler, "_scan_universe", fake_scan)
+    monkeypatch.setattr(handler, "build_selection_report", lambda *a, **k: "body")
+    monkeypatch.setattr(handler, "send_email", lambda *a, **k: None)
+
+    handler.run_selection_reports(users)
+
+    assert sorted(scan_calls) == [("SHORT", "NASDAQ100"), ("SHORT", "SP500")]
+
+
 def test_selection_report_links_use_each_users_own_token(monkeypatch):
     users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com")]
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "SHORT")
-    monkeypatch.setattr(handler, "_scan_universe", lambda mode: ([], {}))
+    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "_scan_universe", lambda mode, universe: ([], {}))
 
     used_tokens = []
-    def fake_build(ranked, signals_map, url, token, mode, lang="ja", as_of=None):
+    def fake_build(ranked, signals_map, url, token, mode, lang="ja", as_of=None, universe=""):
         used_tokens.append(token)
         return "body"
     monkeypatch.setattr(handler, "build_selection_report", fake_build)
@@ -149,16 +172,17 @@ def test_send_monitoring_report_now_fetches_and_caches_when_no_snapshot(monkeypa
 def test_send_selection_report_now_uses_cached_snapshot_without_scanning(monkeypatch):
     """レポート即時発行ボタンは、保存済みスナップショットがあれば新規スキャンしない。"""
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
-    monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode: {
+    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode, universe: {
         "ranked": [{"ticker": "NVDA"}], "signals_map": {"NVDA": {}}, "as_of_date": "2026-08-01",
     })
 
-    def fail_if_called(mode):
+    def fail_if_called(mode, universe):
         raise AssertionError("キャッシュがあるのに_scan_universeが呼ばれた")
     monkeypatch.setattr(handler, "_scan_universe", fail_if_called)
 
     captured = {}
-    def fake_build(ranked, signals_map, url, token, mode, lang="ja", as_of=None):
+    def fake_build(ranked, signals_map, url, token, mode, lang="ja", as_of=None, universe=""):
         captured["ranked"] = ranked
         captured["as_of"] = as_of
         return "body"
@@ -174,10 +198,11 @@ def test_send_selection_report_now_uses_cached_snapshot_without_scanning(monkeyp
 def test_send_selection_report_now_scans_when_no_snapshot(monkeypatch):
     """そのモードで一度もバッチが走っていない場合のみ、その場で1回スキャンする。"""
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
-    monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode: None)
+    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode, universe: None)
 
     scan_calls = []
-    def fake_scan(mode):
+    def fake_scan(mode, universe):
         scan_calls.append(mode)
         return ([{"ticker": "NVDA"}], {"NVDA": {}})
     monkeypatch.setattr(handler, "_scan_universe", fake_scan)

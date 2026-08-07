@@ -295,6 +295,28 @@ def test_selection_report_heading_varies_by_mode_when_english():
     assert "This month's PEG screening results" in body_long
 
 
+def test_selection_report_shows_universe_note_when_given():
+    """S&P500対応(2026-08-07): universeを渡すとどの指数を対象にスキャンしたかを
+    明記する(利用者が複数指数を切り替えられるようになったため)。"""
+    body_nasdaq = build_selection_report([], {}, "https://pegsignal.com/", "tok123", universe="NASDAQ100")
+    body_sp500 = build_selection_report([], {}, "https://pegsignal.com/", "tok123", universe="SP500")
+
+    assert "対象指数: NASDAQ100" in body_nasdaq
+    assert "対象指数: S&P500" in body_sp500
+
+
+def test_selection_report_universe_note_is_english_when_lang_is_en():
+    body = build_selection_report([], {}, "https://pegsignal.com/", "tok123", universe="SP500", lang="en")
+    assert "Universe: S&P 500" in body
+
+
+def test_selection_report_omits_universe_note_when_not_given():
+    """既存呼び出し(universe省略、監視レポート系)との互換のため何も表示しない"""
+    body = build_selection_report([], {}, "https://pegsignal.com/", "tok123")
+    assert "対象指数" not in body
+    assert "Universe:" not in body
+
+
 def test_selection_subject_varies_by_mode():
     from report import selection_subject
 
