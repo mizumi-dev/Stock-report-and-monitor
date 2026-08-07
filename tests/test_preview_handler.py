@@ -238,6 +238,38 @@ class TestPreviewIntroWording:
         assert "cheap" not in body.lower()
 
 
+class TestPreviewDisclaimer:
+    """このページは登録不要で誰でも読める「サービスの顔」であり、銘柄ランキングを
+    そのまま公開表示する。メール本文(build_selection_report)には免責があるが、
+    このページが使うrender_selection_cardsには含まれないため、当初このページには
+    免責が一切表示されていなかった(2026-08-07に発覚)。金商法(投資助言業)に
+    該当しないための根拠として、ランキングより前の位置に表示する。"""
+
+    def test_disclaimer_is_shown_in_japanese(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert "売買を推奨・勧誘するものではありません" in body
+
+    def test_disclaimer_is_shown_in_english(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert "does not recommend or solicit" in body
+
+    def test_disclaimer_appears_before_the_rankings(self, ph):
+        """スクロールしないと見えない位置ではなく、ランキングを見る前に目に入ること"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert body.index("売買を推奨・勧誘するものではありません") < body.index('<h2 id="short"')
+
+    def test_disclaimer_shown_even_when_no_snapshot_exists(self, ph):
+        """スナップショット未生成でも免責は出す(データが無いこととは無関係のため)"""
+        body = ph.handler(_event(), None)["body"]
+        assert "売買を推奨・勧誘するものではありません" in body
+
+
 class TestPreviewReadOnly:
     """このLambdaは読み取り専用であることが設計上の要件(CLAUDE.mdの
     「バッチが計算し正本を保有、ボタン押下は読み取り専用」の原則をこの新画面にも適用)。
