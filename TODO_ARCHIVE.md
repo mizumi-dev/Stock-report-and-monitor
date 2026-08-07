@@ -601,3 +601,59 @@ AWS API自体の制限と判明。リスク再評価の結果、実害は「同�
 
 GitHub ActionsからOIDC連携でLambda 2本のコードを自動デプロイするパイプラインを構築
 (詳細は上部「CI/CD自動デプロイパイプラインの構築」参照、PR #21)。
+
+## 外部公開に向けた進行中の作業（2026-08-02、完了）
+
+外部公開に向けた作業は全て完了済み。最後まで残っていたS&P500ユニバース追加
+(TODO#8)も、register-stock(登録画面)・daily-batch(スキャン)・landing-preview
+(プレビューページ)の全レイヤーで本番反映済み(2026-08-07、PR #42・#43)。
+
+### 8. S&P500ユニバース追加 — 対応済み（2026-08-07、本番反映済み）
+
+画面のプルダウンで対象指数（NASDAQ100/S&P500）を切り替えられるようにした。
+期間モードと全く同じ仕組み（`app_settings` テーブル + `config.py` のプリセット）で実装。
+
+**実装済み**:
+- `config.py`: `UNIVERSES`プリセット・`normalize_universe`・`user_universe_key`等
+- `data_sources.py`: `get_sp500_tickers`（Wikipediaパース、IQVIA誤マッチ問題は解決済み）
+- `handler.py`(daily-batch): `get_user_universe`・ユニバースごとの構成銘柄キャッシュ・
+  選定スキャン・スナップショット分離（`_scan_universe`等）
+- register-stockの画面: 「対象指数」プルダウン（判定期間の下）、切替時の通知、
+  新規ティッカー登録時に選択中ユニバースのキャッシュと照合
+- レポート本文にも対象指数を明記（`report.py`の`_universe_note`）
+- `landing-preview`(pegsignal.com): `?universe=SP500`クエリパラメータでの切替
+  (owner_token不要・書き込みなしの読み取り専用方式)、見出し・タイトルの動的化
+- pytestは全て通過（config/data_sources/daily-batch/register-stock/report/
+  landing-preview各層）
+
+**実データ検証**:
+- daily-batch-devでの実データ動作確認(2026-08-07)。`_test_scan_universe`診断
+  フックでdaily-batch-dev上から実際に`_scan_universe("MID", "SP500")`を実行。
+  Wikipedia構成銘柄取得→並列データ取得(500銘柄)→ランキング→スナップショット
+  保存まで一気通貫で成功(所要88.38秒、Lambdaタイムアウト900秒に対し十分な
+  余裕。ランキング上位はHIG・MU・ON・CVS・TPR、いずれもPEG 0.3以下)。続けて
+  dev環境のテストトークン(`amsllr759@gmail.com`宛)のuniverseを一時的にSP500へ
+  設定し、`force_weekly`経由で`send_selection_report_now`まで実行、保存済み
+  スナップショットから新規スキャンなしで送信できることも確認（200 OK）。
+  検証後、テストトークンのuniverse設定は削除して既定(NASDAQ100)に戻し済み
+- info/guideページ等の説明文がNASDAQ100決め打ちのままの箇所がないかの確認も
+  対応済み。サイトタイトル・meta description・トップ見出し・運営者情報・
+  使い方ガイド・この仕組みについて、のNASDAQ100決め打ち箇所を
+  「NASDAQ100・S&P500(選択制)」に更新済み。「この仕組みについて」ページは
+  利用者が実際に選んでいる指数名を動的に表示する
+- 本番反映: register-stock/daily-batchは先行して本番反映済み、
+  landing-previewは2026-08-07にPR #42でユーザー承認の上マージ・反映
+
+## プレビューページ(pegsignal.com)の追加改善（2026-08-07、対応済み）
+
+- `pegsignal.com`(landing-preview)がNASDAQ100固定表示だった問題を修正し、
+  `?universe=SP500`で対象指数を切り替えられるようにした(langと同じクエリ
+  パラメータ方式、owner_token不要・書き込みなし)。見出し・ページタイトルも
+  選択中の指数名を反映する。本番反映済み(PR #42)
+- 「使い方ガイドを見る」リンクが申込みフォーム内(ページ最下部)にしか無く
+  発見しづらかったため、trust-line直後(ページ冒頭・ランキングより前)に移動。
+  末尾の重複リンクは削除した。本番反映済み(PR #43)
+- **既知の状態(対応不要・監視のみ)**: 本番のS&P500選定スナップショットは、
+  S&P500を選んでいる承認済みユーザーが実質いないため未生成。切り替えUI自体は
+  正常動作しているが、ランキングは「データがまだありません」と表示される。
+  日次バッチが対象ユーザー分を実行すれば自然に埋まる想定
