@@ -1,12 +1,17 @@
 name: deploy
 
-# testsワークフロー(tests.yml)がmaster上で成功した直後にのみ発火する。
+# testsワークフロー(tests.yml)がmaster/develop上で成功した直後にのみ発火する。
 # push/pull_requestで直接トリガーすると、tests.ymlのpytestジョブと二重実行に
 # なってしまうため、workflow_run経由でテスト成功を前提条件にしている。
+#
+# 環境の分離(2026-08-07): master=本番、develop=開発環境(register-stock-dev等、
+# 本番とは別のLambda・別のDynamoDBテーブル、deploy_dev.sh参照)。本番への反映は
+# developブランチで検証した後、ユーザーが明示的にdevelop→masterのPRをマージした
+# 時のみ発生する。
 on:
   workflow_run:
     workflows: ["tests"]
-    branches: [master]
+    branches: [master, develop]
     types: [completed]
 
 permissions:
@@ -32,6 +37,20 @@ jobs:
           role-to-assume: arn:aws:iam::140943195945:role/github-actions-deploy-role
           aws-region: ${{ env.AWS_REGION }}
 
+      # masterなら本番Lambda名、それ以外(develop)なら-devサフィックス付きの
+      # 開発用Lambda名を対象にする。zipの中身(コード)自体は環境で変わらない
+      - name: Determine target Lambda function names
+        run: |
+          if [ "${{ github.event.workflow_run.head_branch }}" = "master" ]; then
+            echo "BATCH_FN=daily-batch" >> "$GITHUB_ENV"
+            echo "REGISTER_FN=register-stock" >> "$GITHUB_ENV"
+            echo "PREVIEW_FN=landing-preview" >> "$GITHUB_ENV"
+          else
+            echo "BATCH_FN=daily-batch-dev" >> "$GITHUB_ENV"
+            echo "REGISTER_FN=register-stock-dev" >> "$GITHUB_ENV"
+            echo "PREVIEW_FN=landing-preview-dev" >> "$GITHUB_ENV"
+          fi
+
       - name: Build daily-batch zip
         run: zip daily_batch.zip handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py
 
@@ -49,15 +68,15 @@ jobs:
 
       - name: Deploy daily-batch
         run: |
-          aws lambda update-function-code --function-name daily-batch \
+          aws lambda update-function-code --function-name "$BATCH_FN" \
             --zip-file fileb://daily_batch.zip --region "$AWS_REGION"
 
       - name: Deploy register-stock
         run: |
-          aws lambda update-function-code --function-name register-stock \
+          aws lambda update-function-code --function-name "$REGISTER_FN" \
             --zip-file fileb://register.zip --region "$AWS_REGION"
 
       - name: Deploy landing-preview
         run: |
-          aws lambda update-function-code --function-name landing-preview \
+          aws lambda update-function-code --function-name "$PREVIEW_FN" \
             --zip-file fileb://preview.zip --region "$AWS_REGION"
