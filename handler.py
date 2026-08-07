@@ -406,25 +406,35 @@ def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_rep
     )
 
 
-def _diagnose_fetch_timing(n: int) -> dict:
-    """TODO#3診断用。yfinanceのYfDataがプロセス全体のシングルトンであるとソースコード
-    (yfinance/data.py, SingletonMeta + threading.Lock)から判明したため、"逐次 vs 並列"
-    に加えて "history()のみ vs .info込み" の内訳も計測し、ボトルネックの所在を切り分ける。
-    書き込みは一切行わない(読み取り専用の診断)。"""
+def _diagnose_fetch_timing(n: int, universe: str = "NASDAQ100", sequential: bool = True) -> dict:
+    """TODO#3/TODO#8診断用。yfinanceのYfDataがプロセス全体のシングルトンであると
+    ソースコード(yfinance/data.py, SingletonMeta + threading.Lock)から判明したため、
+    "逐次 vs 並列"の所要時間を実測して比較する。書き込みは一切行わない(読み取り専用)。
+    universe="SP500"を指定すればS&P500規模(500銘柄超)での実測もできる。
+    sequential=Falseなら逐次計測を省略し、並列のみ計測する(件数が多いと逐次計測が
+    支配的に時間を食うため、本番と同じ並列経路の実測だけで十分な場合に使う)。"""
     import time
+    from config import normalize_universe
+    from data_sources import get_sp500_tickers
 
+    universe = normalize_universe(universe)
     cached = get_cached_tickers()
-    tickers = get_nasdaq100_tickers(fallback=cached)[:n]
+    if universe == "SP500":
+        tickers = get_sp500_tickers(fallback=cached)[:n]
+    else:
+        tickers = get_nasdaq100_tickers(fallback=cached)[:n]
 
     def fetch_history_only(t):
         start = time.monotonic()
         d = get_stock_data(t, period="6mo", min_rows=1)
         return t, time.monotonic() - start, d.get("error")
 
-    # 逐次
-    t0 = time.monotonic()
-    seq_results = [fetch_history_only(t) for t in tickers]
-    seq_total = time.monotonic() - t0
+    seq_total = seq_avg = None
+    if sequential:
+        t0 = time.monotonic()
+        seq_results = [fetch_history_only(t) for t in tickers]
+        seq_total = time.monotonic() - t0
+        seq_avg = sum(r[1] for r in seq_results) / len(seq_results) if seq_results else 0
 
     # 並列(本番と同じFETCH_MAX_WORKERS)
     t0 = time.monotonic()
@@ -432,18 +442,18 @@ def _diagnose_fetch_timing(n: int) -> dict:
         par_results = list(ex.map(fetch_history_only, tickers))
     par_total = time.monotonic() - t0
 
-    seq_avg = sum(r[1] for r in seq_results) / len(seq_results) if seq_results else 0
     par_avg = sum(r[1] for r in par_results) / len(par_results) if par_results else 0
     errors = [r[0] for r in par_results if r[2]]
 
     result = {
+        "universe": universe,
         "n_tickers": len(tickers),
         "workers": FETCH_MAX_WORKERS,
-        "sequential_total_sec": round(seq_total, 2),
-        "sequential_avg_per_ticker_sec": round(seq_avg, 2),
+        "sequential_total_sec": round(seq_total, 2) if seq_total is not None else None,
+        "sequential_avg_per_ticker_sec": round(seq_avg, 2) if seq_avg is not None else None,
         "parallel_total_sec": round(par_total, 2),
         "parallel_avg_per_ticker_sec": round(par_avg, 2),
-        "speedup": round(seq_total / par_total, 2) if par_total else None,
+        "speedup": round(seq_total / par_total, 2) if seq_total and par_total else None,
         "errors": errors,
     }
     print(f"[DIAG] fetch timing: {result}")
@@ -462,7 +472,11 @@ def _dispatch(event: dict) -> dict:
     # 通信がブロックされておりテストできないため、実際にネットワーク到達できる
     # daily-batch-dev上でのみ実行して計測する。読み取りのみで副作用は無い。
     if event.get("_test_fetch_timing"):
-        return _diagnose_fetch_timing(event.get("_test_fetch_timing_n", 20))
+        return _diagnose_fetch_timing(
+            event.get("_test_fetch_timing_n", 20),
+            event.get("_test_fetch_universe", "NASDAQ100"),
+            event.get("_test_fetch_sequential", True),
+        )
 
     # TODO#8診断: S&P500構成銘柄取得(Wikipediaパース)が実際に機能するかの検証用。
     # サンドボックス開発環境からはWikipediaへの通信もブロックされているため、
