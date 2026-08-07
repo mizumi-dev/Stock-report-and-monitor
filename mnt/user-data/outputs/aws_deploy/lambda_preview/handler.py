@@ -35,7 +35,7 @@ import os
 import boto3
 
 from config import SETTINGS_TABLE_DEFAULT, selection_snapshot_key
-from report import LANG_EN, LANG_JA, render_selection_cards, selection_subject
+from report import LANG_EN, LANG_JA, render_selection_cards, selection_subject, t
 
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
 REGISTER_URL = os.environ.get("REGISTER_URL", "")
@@ -103,6 +103,7 @@ button{background:var(--accent);color:var(--accent-ink);border:none;padding:10px
 .btn-link{display:inline-block;background:var(--accent);color:var(--accent-ink)!important;
   border-radius:8px;padding:10px 18px;font-weight:600;text-decoration:none!important;}
 .site-footer{max-width:560px;margin:16px auto 0;text-align:center;}
+.disclaimer{border-left:3px solid var(--border);padding-left:10px;margin:0 0 18px;}
 """
 
 
@@ -125,6 +126,20 @@ def _intro_html(lang: str) -> str:
     短期・中期・長期の3つの期間でランキングしています。
     下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
     """
+
+
+def _disclaimer_html(lang: str) -> str:
+    """免責文(「機械的な計算結果であり売買推奨ではない」)。
+
+    このページは**登録不要で誰でも読めるサービスの顔**であり、銘柄ランキングを
+    そのまま公開表示する。メール本文(report.pyのbuild_selection_report)には
+    免責が入っているが、このページが使う render_selection_cards には含まれない
+    ため、当初このページには免責が一切表示されていなかった(2026-08-07に発覚し追加)。
+
+    金商法(投資助言業)に該当しないための根拠として、ランキングを見る前に
+    目に入る位置(ページ上部)に置く。文言はreport.pyのT辞書を正本として共有し、
+    メール本文と表現がズレないようにする。"""
+    return f'<p class="muted disclaimer">{t("disclaimer", lang)}</p>'
 
 
 def _mode_nav_html(lang: str) -> str:
@@ -226,5 +241,6 @@ def handler(event, context):
 
     lang = _detect_lang(event)
     sections = "".join(_mode_section_html(m, lang, REGISTER_URL) for m in _MODES)
-    inner = _intro_html(lang) + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL)
+    inner = (_intro_html(lang) + _disclaimer_html(lang) + _mode_nav_html(lang)
+             + sections + _signup_pitch_html(lang, REGISTER_URL))
     return _page(inner, lang)

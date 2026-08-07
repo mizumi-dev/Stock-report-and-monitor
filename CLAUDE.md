@@ -48,6 +48,13 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
     CloudFrontディストリビューション・同じRoute53ホストゾーン内の別レコード)
     で追加した(`deploy_domain_preview.sh`)。register-stockの申込み画面には
     `PREVIEW_URL`環境変数が設定されていれば「登録せずに見る」リンクが表示される
+- **メール内リンクは`app.pegsignal.com`(2026-08-07追加)**。register-stock・
+  daily-batch共通の`REGISTER_FUNCTION_URL`環境変数が指すドメインで、以前は
+  生のLambda Function URL(`xxxxx.lambda-url.us-east-1.on.aws`)だったが、
+  株式サービスのメールに生のAWS URLが入っているとフィッシングに見え信頼性・
+  到達率を損なうため、ブランド化されたサブドメインに切替済み(`deploy_domain_app.sh`、
+  `pegsignal.com`本体には触れず同じregister-stock Lambdaを指す別ドメインを追加)。
+  レポート即時発行の確認リンク・アクセス用リンク等はすべてこのドメインを使う
 - マルチテナント設計。`owner_token`でユーザーを識別
 - DynamoDBテーブル:
   - `watchlist`: ユーザーごとの監視銘柄
