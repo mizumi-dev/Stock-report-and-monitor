@@ -431,119 +431,12 @@ def should_send_selection(mode: str, weekday: str, day_of_month: int, weekly_rep
     )
 
 
-def _diagnose_fetch_timing(n: int, universe: str = "NASDAQ100", sequential: bool = True) -> dict:
-    """TODO#3/TODO#8診断用。yfinanceのYfDataがプロセス全体のシングルトンであると
-    ソースコード(yfinance/data.py, SingletonMeta + threading.Lock)から判明したため、
-    "逐次 vs 並列"の所要時間を実測して比較する。書き込みは一切行わない(読み取り専用)。
-    universe="SP500"を指定すればS&P500規模(500銘柄超)での実測もできる。
-    sequential=Falseなら逐次計測を省略し、並列のみ計測する(件数が多いと逐次計測が
-    支配的に時間を食うため、本番と同じ並列経路の実測だけで十分な場合に使う)。"""
-    import time
-
-    universe = normalize_universe(universe)
-    cached = get_cached_tickers(universe)
-    if universe == "SP500":
-        tickers = get_sp500_tickers(fallback=cached)[:n]
-    else:
-        tickers = get_nasdaq100_tickers(fallback=cached)[:n]
-
-    def fetch_history_only(t):
-        start = time.monotonic()
-        d = get_stock_data(t, period="6mo", min_rows=1)
-        return t, time.monotonic() - start, d.get("error")
-
-    seq_total = seq_avg = None
-    if sequential:
-        t0 = time.monotonic()
-        seq_results = [fetch_history_only(t) for t in tickers]
-        seq_total = time.monotonic() - t0
-        seq_avg = sum(r[1] for r in seq_results) / len(seq_results) if seq_results else 0
-
-    # 並列(本番と同じFETCH_MAX_WORKERS)
-    t0 = time.monotonic()
-    with ThreadPoolExecutor(max_workers=FETCH_MAX_WORKERS) as ex:
-        par_results = list(ex.map(fetch_history_only, tickers))
-    par_total = time.monotonic() - t0
-
-    par_avg = sum(r[1] for r in par_results) / len(par_results) if par_results else 0
-    errors = [r[0] for r in par_results if r[2]]
-
-    result = {
-        "universe": universe,
-        "n_tickers": len(tickers),
-        "workers": FETCH_MAX_WORKERS,
-        "sequential_total_sec": round(seq_total, 2) if seq_total is not None else None,
-        "sequential_avg_per_ticker_sec": round(seq_avg, 2) if seq_avg is not None else None,
-        "parallel_total_sec": round(par_total, 2),
-        "parallel_avg_per_ticker_sec": round(par_avg, 2),
-        "speedup": round(seq_total / par_total, 2) if seq_total and par_total else None,
-        "errors": errors,
-    }
-    print(f"[DIAG] fetch timing: {result}")
-    return {"statusCode": 200, "body": result}
-
-
 def _dispatch(event: dict) -> dict:
     # TODO#7b: 例外捕捉→通知の経路を本番に影響を与えずテストするためのフック。
     # 実データには一切触れず即座に例外を送出するだけなので、実AWS環境で安全に
     # 障害通知の実地確認ができる(test-skip-reviewスキルでの検討結果を反映)。
     if event.get("_test_trigger_failure"):
         raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
-
-    # TODO#3: 銘柄ユニバース拡張(S&P500)の着手条件になっている並列化タイムアウト
-    # 対策の実データ検証用フック。このサンドボックス開発環境からはYahoo Financeへの
-    # 通信がブロックされておりテストできないため、実際にネットワーク到達できる
-    # daily-batch-dev上でのみ実行して計測する。読み取りのみで副作用は無い。
-    if event.get("_test_fetch_timing"):
-        return _diagnose_fetch_timing(
-            event.get("_test_fetch_timing_n", 20),
-            event.get("_test_fetch_universe", "NASDAQ100"),
-            event.get("_test_fetch_sequential", True),
-        )
-
-    # TODO#8診断: S&P500構成銘柄取得(Wikipediaパース)が実際に機能するかの検証用。
-    # サンドボックス開発環境からはWikipediaへの通信もブロックされているため、
-    # 実際に外部通信できるdaily-batch-dev上でのみ検証できる。読み取りのみ。
-    if event.get("_test_fetch_sp500_raw_html"):
-        # IQVIAという誤ったティッカーが混入する原因を調べるための一時的な生HTML確認。
-        # Wikipediaの該当行の実際のマークアップを見て、正規表現をどう直すべきか判断する
-        import urllib.request
-        from data_sources import SP500_WIKI_URL, UA
-        req = urllib.request.Request(SP500_WIKI_URL, headers={"User-Agent": UA})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            html = resp.read().decode("utf-8", errors="replace")
-        idx = html.find("IQVIA")
-        return {"statusCode": 200, "body": {"excerpt": html[max(0, idx - 400):idx + 200]}}
-
-    if event.get("_test_fetch_sp500"):
-        from collections import Counter
-        from data_sources import get_sp500_tickers
-        tickers = get_sp500_tickers()
-        dups = {t: c for t, c in Counter(tickers).items() if c > 1}
-        return {"statusCode": 200, "body": {
-            "count": len(tickers), "sample": tickers[:10],
-            "unique_count": len(set(tickers)), "duplicates": dups,
-            "has_IQV": "IQV" in tickers, "has_IQVIA": "IQVIA" in tickers,
-        }}
-
-    # TODO#8診断: register-stockから配線したユニバース切替機能が、実際にS&P500の
-    # 選定スキャン(構成銘柄取得→並列データ取得→ランキング→スナップショット保存)
-    # まで一気通貫で動くかの実地検証用。_scan_universe自体は本番と同じ経路を通る
-    # (テスト用の特別分岐は無い)。スナップショット保存はdev環境のapp_settings-dev
-    # に対してのみ行われる(本番データには一切触れない)。
-    if event.get("_test_scan_universe"):
-        import time
-        t0 = time.monotonic()
-        ranked, signals_map = _scan_universe(
-            event.get("_test_scan_mode", "MID"),
-            event.get("_test_scan_universe_name", "SP500"),
-        )
-        return {"statusCode": 200, "body": {
-            "elapsed_sec": round(time.monotonic() - t0, 2),
-            "ranked_count": len(ranked),
-            "top5": [{"ticker": r["ticker"], "peg": r.get("peg")} for r in ranked[:5]],
-            "signals_map_count": len(signals_map),
-        }}
 
     owner_token = event.get("owner_token")
 
