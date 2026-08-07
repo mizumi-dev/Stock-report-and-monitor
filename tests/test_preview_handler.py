@@ -38,7 +38,7 @@ def ph():
     return module
 
 
-def _put_snapshot(ph, mode, ranked=None, signals_map=None, as_of="2026-08-06"):
+def _put_snapshot(ph, mode, ranked=None, signals_map=None, as_of="2026-08-06", universe="NASDAQ100"):
     ranked = ranked if ranked is not None else [
         {"ticker": "NVDA", "company_name": "NVIDIA", "peg": 1.2,
          "earnings_growth": 0.3, "market_cap": 1e12},
@@ -46,8 +46,11 @@ def _put_snapshot(ph, mode, ranked=None, signals_map=None, as_of="2026-08-06"):
     signals_map = signals_map if signals_map is not None else {
         "NVDA": {"buy_trend": True, "buy_momentum": False, "volume_high": False},
     }
+    key = f"selection_snapshot#{mode}"
+    if universe != "NASDAQ100":
+        key += f"#{universe}"
     ph.dynamodb.Table("app_settings").put_item(Item={
-        "key": f"selection_snapshot#{mode}",
+        "key": key,
         "ranked": ranked, "signals_map": signals_map, "as_of_date": as_of,
     })
 
@@ -228,6 +231,71 @@ class TestPreviewLanguage:
         body = ph.handler(_event(lang="en"), None)["body"]
         visible = re.sub(r"<style>.*?</style>", "", body, flags=re.S)
         assert not re.search(r"[ぁ-んァ-ン一-龥]", visible)
+
+
+class TestPreviewUniverse:
+    """対象指数(NASDAQ100/S&P500)の切り替え(2026-08-07追加)。langと同様、
+    owner_token不要のクエリパラメータ方式で、書き込みは一切発生しない。"""
+
+    def test_defaults_to_nasdaq100(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m, ranked=[{"ticker": "NDX", "company_name": "N社", "peg": 1.0,
+                                          "earnings_growth": 0.3, "market_cap": 1}],
+                          signals_map={"NDX": {"buy_trend": True}})
+        body = ph.handler(_event(), None)["body"]
+        assert "NASDAQ100" in body
+        assert "NDX" in body
+
+    def test_universe_param_switches_to_sp500_snapshot(self, ph):
+        _put_snapshot(ph, "SHORT", ranked=[{"ticker": "NDX", "company_name": "N社", "peg": 1.0,
+                                            "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"NDX": {"buy_trend": True}}, universe="NASDAQ100")
+        _put_snapshot(ph, "SHORT", ranked=[{"ticker": "SPX", "company_name": "S社", "peg": 1.0,
+                                            "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"SPX": {"buy_trend": True}}, universe="SP500")
+        body = ph.handler(_event(universe="SP500"), None)["body"]
+        assert "SPX" in body
+        assert "NDX" not in body
+
+    def test_unknown_universe_falls_back_to_default(self, ph):
+        _put_snapshot(ph, "SHORT", ranked=[{"ticker": "NDX", "company_name": "N社", "peg": 1.0,
+                                            "earnings_growth": 0.3, "market_cap": 1}],
+                      signals_map={"NDX": {"buy_trend": True}})
+        body = ph.handler(_event(universe="NIKKEI225"), None)["body"]
+        assert "NDX" in body
+
+    def test_universe_switcher_links_exist_for_both_universes(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(), None)["body"]
+        assert 'href="?universe=NASDAQ100"' in body
+        assert 'href="?universe=SP500"' in body
+
+    def test_selected_universe_link_is_marked_active(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m, universe="SP500")
+        body = ph.handler(_event(universe="SP500"), None)["body"]
+        assert '<a href="?universe=SP500" class="active">' in body
+
+    def test_universe_switcher_preserves_selected_language(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert 'href="?universe=SP500&lang=en"' in body
+
+    def test_heading_reflects_sp500_when_selected(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m, universe="SP500")
+        body = ph.handler(_event(universe="SP500"), None)["body"]
+        assert "S&amp;P500" in body or "S&P500" in body
+        assert "NASDAQ100" not in body.split("<h1>")[1].split("</h1>")[0]
+
+    def test_page_title_reflects_selected_universe(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m, universe="SP500")
+        body = ph.handler(_event(universe="SP500"), None)["body"]
+        title = body.split("<title>")[1].split("</title>")[0]
+        assert "S&P500" in title
 
 
 class TestPreviewIntroWording:
