@@ -79,9 +79,30 @@
    なった。`pegsignal.com`本体には一切触れておらず、同じLambda(register-stock)
    を指す別ドメインを追加しただけなので、切替期間中はどちらのドメインでも
    アクセスできる状態
-3. **未着手**: `pegsignal.com`の向き先をlanding-previewに入れ替え、apexを
-   コンテンツにする。2が完了したため、既存ユーザーのメール内リンクは
-   `app.pegsignal.com`を指しており、apex入れ替えの影響を受けない
+3. **対応済み(2026-08-07)**: `pegsignal.com`のCloudFrontオリジンを
+   `register-stock`から`landing-preview`に入れ替え、apexをコンテンツにした。
+   既存の`pegsignal.com`ディストリビューション(ID `E3U35958A487A5`)を直接
+   更新(新規追加ではなく、稼働中ディストリビューションのオリジン差し替え、
+   この段階のみ影響範囲が大きい変更だったため慎重に実施)。あわせて
+   `landing-preview`の`REGISTER_URL`を`pegsignal.com`(切替後は自分自身を指す
+   ことになり循環する)から`app.pegsignal.com`へ事前修正。
+   `preview.pegsignal.com`はapexと内容が重複したため無効化(削除はせず
+   `Enabled=False`のまま残置、CloudFrontディストリビューションID
+   `EZW5FYV1PT3FO`)
+4. **対応済み(2026-08-07)**: 「Webで完結させたい」というユーザー要望を受け、
+   previewページの申込み導線をボタンリンクから、実際のメール入力欄+CAPTCHA
+   付きフォームに変更(`action`をregister-stockに向けたmethod="GET"の素の
+   HTMLフォーム、登録処理自体は複製しない)。さらに「文字だけで見にくい・
+   登録メリットがわかりにくい」というフィードバックを受け、旧register-stock
+   トップページにあった安心材料(trust-line)・3ステップの視覚的な流れ・
+   「登録不要で見れること」と「登録すると増えること」の2列比較表を追加した
+
+**この結果、現在のドメイン構成は次のとおり**:
+- `pegsignal.com`: 選定結果のプレビュー(登録不要) + 埋め込み申込みフォーム
+  (landing-preview)
+- `app.pegsignal.com`: 銘柄監視・設定変更・レポート発行・退会などの実処理、
+  メール内リンクの遷移先(register-stock)
+- `preview.pegsignal.com`: 無効化済み(内容がpegsignal.comと重複したため)
 
 ### 下書き文面（Claudeが用意、ユーザーが選んで投稿する想定）
 実際の投稿はユーザー自身の判断・アカウントで行う。文面は`docs/growth-drafts.md`
