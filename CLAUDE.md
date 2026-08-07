@@ -68,10 +68,25 @@ PegSignal — NASDAQ100銘柄をPEGレシオでスクリーニングし、トレ
 - 各Lambdaのzip内容・デプロイ手順は`deploy.sh`等のスクリプト参照
 - デプロイ用IAMユーザーの権限には制約があり、都度必要な権限を確認しながら
   作業する(セキュリティ節のインラインポリシー方針も参照)
+- **開発環境と本番環境の分離(2026-08-07)**: `develop`ブランチ=開発環境、
+  `master`ブランチ=本番環境。開発環境は本番と物理的に完全に分離した別Lambda
+  (`daily-batch-dev`・`register-stock-dev`・`landing-preview-dev`)・別DynamoDB
+  テーブル(`watchlist-dev`等、すべて`-dev`サフィックス)で構成する
+  (`deploy_dev.sh`参照)。本番のapproved_tokens・selection_snapshotを開発環境と
+  共有すると、開発環境のテスト操作が本番のメール送信・正本データ更新を
+  引き起こしてしまうため、テーブルレベルで分離が必須という判断
+  (詳細はTODO.md参照)。**`develop`へのマージはCI/CDで開発環境へ自動デプロイ
+  されるが、本番(`master`)への反映は必ずユーザーの明示的な承認(develop→master
+  のPRをユーザー自身がマージすること)を経てから行う。ユーザーの指示なく
+  master へのマージ・本番デプロイを行わないこと**
+- `daily-batch-dev`にはEventBridgeの定期実行スケジュールを組んでいない
+  (無人でのコスト発生・誤動作を避けるため、手動起動のみ)
 
 ## 開発フロー
 
-- 機能追加はブランチを切ってPRを作成する運用(featureブランチ→PR→CI→マージ)
+- 機能追加は`develop`ブランチを起点にfeatureブランチを切ってPRを作成する運用
+  (featureブランチ→PR→CI→developへマージ→開発環境で確認→ユーザー承認後に
+  develop→masterのPRをマージして本番反映)
 - 完了したタスク・既知の課題は`TODO.md`に記録する。日付・背景・対応内容・
   未着手事項を簡潔に書く運用を維持する
 - **`TODO.md`には未着手・要検討の項目が残っているセクションのみを置く。
