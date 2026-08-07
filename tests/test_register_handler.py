@@ -202,6 +202,25 @@ class TestTickerValidation:
         assert r["statusCode"] == 200
         assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
 
+    def test_ticker_validated_against_selected_universes_cache(self, rh):
+        """利用者がS&P500を選んでいれば、NASDAQ100キャッシュではなくS&P500の
+        キャッシュ(sp500_tickers_cache)と突き合わせる(S&P500対応、2026-08-07)。"""
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "nasdaq100_tickers_cache", "value": ["NVDA", "AAPL"]})
+        rh.dynamodb.Table("app_settings").put_item(
+            Item={"key": "sp500_tickers_cache", "value": ["JNJ", "KO"]})
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+
+        # NASDAQ100専用銘柄(NVDA)はS&P500ユニバース選択時は拒否される
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="NVDA"), None)
+        assert r["statusCode"] == 400
+        assert len(rh.dynamodb.Table("watchlist").scan()["Items"]) == 0
+
+        # S&P500銘柄(KO)は受け入れられる
+        r = rh.handler(_event(token=VALID_TOKEN, ticker="KO"), None)
+        assert r["statusCode"] == 200
+        assert rh.dynamodb.Table("watchlist").scan()["Items"][0]["ticker"] == "KO"
+
 
 class TestAccessRecoveryHint:
     def test_signup_form_mentions_resend_on_lost_link(self, rh):
@@ -721,6 +740,31 @@ class TestPeriodMode:
             Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
         rh.handler(_event(token=VALID_TOKEN, mode="SHORT"), None)
         assert rh.get_period_mode("other-tok") == "MID"  # 他人のモード変更は影響しない
+
+
+class TestUniverse:
+    """対象指数(ユニバース、NASDAQ100/S&P500)の切替。period_modeと全く同じ
+    仕組み(app_settings + プリセット辞書)で実装しているため、テストも
+    TestPeriodModeと対になるように揃えている(S&P500対応、2026-08-07)。"""
+
+    def test_universe_switch_persists(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert rh.get_universe(VALID_TOKEN) == "SP500"
+        rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100"), None)
+        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"
+
+    def test_unknown_universe_falls_back_to_default(self, rh):
+        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"  # 未設定時はDEFAULT_UNIVERSE
+
+    def test_universe_is_isolated_per_user(self, rh):
+        rh.dynamodb.Table("approved_tokens").put_item(
+            Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert rh.get_universe("other-tok") == "NASDAQ100"  # 他人のユニバース変更は影響しない
+
+    def test_universe_change_notice_shows_new_universe_label(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        assert "対象指数を「S&P500」に変更しました" in r["body"]
 
 
 class TestInfoPagesLanguage:

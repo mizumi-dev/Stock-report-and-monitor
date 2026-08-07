@@ -23,16 +23,20 @@ from boto3.dynamodb.conditions import Key
 from datetime import datetime, timezone
 
 from config import (
+    DEFAULT_UNIVERSE,
     MAX_PEG,
     MIN_GROWTH,
-    NASDAQ100_CACHE_KEY,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
     TOKEN_STATUS_PENDING,
+    UNIVERSES,
     get_preset,
     normalize_mode,
+    normalize_universe,
+    universe_cache_key,
     user_period_mode_key,
+    user_universe_key,
 )
 from mailer import ResendMailer
 
@@ -336,14 +340,14 @@ def _current_watchlist(owner_token: str) -> list[str]:
     return sorted(item["ticker"] for item in resp.get("Items", []))
 
 
-def _is_known_ticker(ticker: str) -> bool:
-    """daily-batchが保存するNASDAQ100構成銘柄キャッシュと突き合わせ、
-    実在しない/打ち間違えたティッカーの登録を防ぐ(TODO#13)。
+def _is_known_ticker(ticker: str, universe: str = DEFAULT_UNIVERSE) -> bool:
+    """daily-batchが保存する構成銘柄キャッシュ(利用者が選んだ対象指数のもの)と
+    突き合わせ、実在しない/打ち間違えたティッカーの登録を防ぐ(TODO#13)。
     キャッシュ自体が未生成・読み取り失敗の場合は、正しい銘柄の登録を
     誤ってブロックしないよう許可する(fail-open)"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
-        resp = table.get_item(Key={"key": NASDAQ100_CACHE_KEY})
+        resp = table.get_item(Key={"key": universe_cache_key(universe)})
         known = resp.get("Item", {}).get("value")
         if not known:
             return True
@@ -370,6 +374,26 @@ def set_period_mode(owner_token: str, mode: str) -> str:
     table.put_item(Item={"key": user_period_mode_key(owner_token), "value": mode,
                          "updated_at": datetime.now(timezone.utc).isoformat()})
     return mode
+
+
+def get_universe(owner_token: str) -> str:
+    """利用者が選んだ対象指数(ユニバース)。get_period_modeと同じ方針で、
+    設定が読めなくても画面は出したいので失敗時は既定(NASDAQ100)扱いにする。"""
+    try:
+        table = dynamodb.Table(SETTINGS_TABLE)
+        resp = table.get_item(Key={"key": user_universe_key(owner_token)})
+        return normalize_universe(resp.get("Item", {}).get("value"))
+    except Exception as e:
+        print(f"[WARN] ユニバース取得に失敗: {e}")
+        return normalize_universe(None)
+
+
+def set_universe(owner_token: str, universe: str) -> str:
+    universe = normalize_universe(universe)
+    table = dynamodb.Table(SETTINGS_TABLE)
+    table.put_item(Item={"key": user_universe_key(owner_token), "value": universe,
+                         "updated_at": datetime.now(timezone.utc).isoformat()})
+    return universe
 
 
 def _trigger_report(report: str, owner_token: str):
@@ -726,6 +750,8 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
     watchlist = _current_watchlist(token)
     mode = get_period_mode(token)
     preset = get_preset(mode)
+    universe = get_universe(token)
+    universe_preset = UNIVERSES[universe]
 
     if lang == LANG_EN:
         delete_label = "delete"
@@ -745,6 +771,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
             for k in PERIOD_PRESETS
         )
         preset_en = PERIOD_PRESETS[mode]
+        universe_options = "".join(
+            f'<option value="{k}"{" selected" if k == universe else ""}>{p["label_en"]}</option>'
+            for k, p in UNIVERSES.items()
+        )
         notice_html = f'<p class="notice">{notice}</p>' if notice else ""
         lang_switch = (
             f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
@@ -769,6 +799,17 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
           <button type="submit" style="padding:8px 16px;">Change</button>
         </form>
         <p style="color:#888;font-size:12px;">Current: <strong>{preset_en['label_en']}</strong> — {preset_en['description_en']}</p>
+
+        <hr style="margin:24px 0;">
+        <h3>Index universe</h3>
+        <form method="GET">
+          <input type="hidden" name="token" value="{t}">
+          <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
+          <button type="submit" style="padding:8px 16px;">Change</button>
+        </form>
+        <p style="color:#888;font-size:12px;">
+          Current: <strong>{universe_preset['label_en']}</strong> — selection reports rank stocks from this index.
+          New tickers you register must belong to it too.</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -800,6 +841,10 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
         f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
         for k, p in PERIOD_PRESETS.items()
     )
+    universe_options = "".join(
+        f'<option value="{k}"{" selected" if k == universe else ""}>{p["label"]}</option>'
+        for k, p in UNIVERSES.items()
+    )
 
     notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
 
@@ -822,6 +867,17 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
       <button type="submit" style="padding:8px 16px;">変更</button>
     </form>
     <p style="color:#888;font-size:12px;">現在: <strong>{preset['label']}</strong> — {preset['description']}</p>
+
+    <hr style="margin:24px 0;">
+    <h3>対象指数</h3>
+    <form method="GET">
+      <input type="hidden" name="token" value="{t}">
+      <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
+      <button type="submit" style="padding:8px 16px;">変更</button>
+    </form>
+    <p style="color:#888;font-size:12px;">
+      現在: <strong>{universe_preset['label']}</strong> — 選定レポートはこの指数の構成銘柄から選びます。
+      新規登録する銘柄もこの指数に含まれている必要があります。</p>
 
     <hr style="margin:24px 0;">
     <h3>レポートを今すぐ送信</h3>
@@ -1598,6 +1654,8 @@ def _classify_route(params: dict) -> str:
         return "delete_account"
     if params.get("mode"):
         return "mode_change"
+    if params.get("universe"):
+        return "universe_change"
     if params.get("report") in ("selection", "monitoring"):
         return f"report_{params['report']}"
     if params.get("ticker"):
@@ -1745,6 +1803,16 @@ def handler(event, context):
                   else f"判定期間を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
+    # 対象指数(ユニバース)の変更。期間モードと全く同じ仕組み(app_settings +
+    # プリセット辞書)で実装している(S&P500対応、2026-08-07)
+    if params.get("universe"):
+        universe = set_universe(token, params["universe"])
+        preset = UNIVERSES[universe]
+        notice = (f'Universe changed to "{preset["label_en"]}". This applies from the next report.'
+                  if lang == LANG_EN
+                  else f"対象指数を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
+        return _page(_render_form(token, lang, notice=notice), lang=lang)
+
     # レポートの即時送信(非同期起動)
     report = (params.get("report") or "").strip().lower()
     if report in ("selection", "monitoring"):
@@ -1786,11 +1854,14 @@ def handler(event, context):
                   else f"{ticker} を監視リストから削除しました。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
-    if not _is_known_ticker(ticker):
+    universe = get_universe(token)
+    if not _is_known_ticker(ticker, universe):
+        universe_preset = UNIVERSES[universe]
+        universe_label = universe_preset["label_en"] if lang == LANG_EN else universe_preset["label"]
         notice = (f'Couldn\'t find a ticker called "{ticker}". Please check the symbol '
-                   f"against NASDAQ100 constituents and try again." if lang == LANG_EN
+                   f"against {universe_label} constituents and try again." if lang == LANG_EN
                   else f"「{ticker}」という銘柄は見つかりませんでした。"
-                       f"NASDAQ100構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
+                       f"{universe_label}構成銘柄の中から、ティッカーを確認してもう一度お試しください。")
         return _page(_render_form(token, lang, notice=notice), status=400, lang=lang)
 
     watchlist = _current_watchlist(token)

@@ -157,9 +157,12 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
 
 外部公開に向けた作業の大半は完了済み(詳細は`TODO_ARCHIVE.md`参照)。
 
-- [ ] **S&P500ユニバース追加(TODO#8)は着手中(2026-08-07〜)**。以前は
-  タイムアウト対策未解決を理由に見送っていたが、実データ検証の結果、現行の
-  並列取得で十分対応できると判断できたため着手した(詳細はTODO#8参照)
+- [ ] **S&P500ユニバース追加(TODO#8)は開発環境で実装済み(2026-08-07)、
+  本番未反映**。config.py(ユニバースプリセット)・data_sources.py(Wikipedia
+  パース)・daily-batch(ユニバースごとのスキャン・スナップショット分離)・
+  register-stock(画面のプルダウン切替・ティッカー検証)まで一通り実装し、
+  テスト(pytest)は全て通過済み。実データでの動作確認(daily-batch-devへの
+  実際のバッチ実行)と、本番反映のユーザー承認はこれから(詳細はTODO#8参照)
 
 ---
 
@@ -177,14 +180,28 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
 
 ## 優先度: 低（将来の機能追加）
 
-### 8. 銘柄ユニバースの切り替え（S&P500 / NYダウ / 日経225）— 着手中（2026-08-07〜、開発環境）
+### 8. 銘柄ユニバースの切り替え（S&P500 / NYダウ / 日経225）— S&P500分は実装済み・検証待ち（2026-08-07、開発環境）
 
-画面のプルダウンで対象指数を切り替えられるようにしたい。
-期間モードと同じ仕組み（`app_settings` テーブル + `config.py` のプリセット）で実装できる。
-タイムアウト対策は実データ検証により解決済み(詳細は`TODO_ARCHIVE.md`の
-「銘柄ユニバース拡張時のタイムアウト対策」参照)。NASDAQ100の次にS&P500を
-導入予定(`CLAUDE.md`にも記載)。**開発環境(`develop`)で実装・検証し、
-本番反映はユーザー承認後。**
+画面のプルダウンで対象指数（NASDAQ100/S&P500）を切り替えられるようにした。
+期間モードと全く同じ仕組み（`app_settings` テーブル + `config.py` のプリセット）で実装。
+
+**実装済み**:
+- `config.py`: `UNIVERSES`プリセット・`normalize_universe`・`user_universe_key`等
+- `data_sources.py`: `get_sp500_tickers`（Wikipediaパース、IQVIA誤マッチ問題は解決済み）
+- `handler.py`(daily-batch): `get_user_universe`・ユニバースごとの構成銘柄キャッシュ・
+  選定スキャン・スナップショット分離（`_scan_universe`等）
+- register-stockの画面: 「対象指数」プルダウン（判定期間の下）、切替時の通知、
+  新規ティッカー登録時に選択中ユニバースのキャッシュと照合
+- レポート本文にも対象指数を明記（`report.py`の`_universe_note`）
+- pytestは全て通過（config/data_sources/daily-batch/register-stock/report各層）
+
+**未実施（次点）**:
+- daily-batch-devでの実データ動作確認（実際にS&P500ユニバースでスキャン・
+  メール送信まで通しで走らせる。Lambdaタイムアウトは900秒でTODO#3の実測
+  （S&P500推定70〜90秒）に対し十分な余裕はあるが、実運用での確認は未実施）
+- info/guideページ等の説明文がNASDAQ100決め打ちのままの箇所がないかの確認
+- 本番反映はユーザー承認後（develop→masterのPRをユーザー自身がマージ）
+- NYダウ・日経225は未着手（S&P500と同じ`UNIVERSES`拡張パターンで対応可能）
 
 ### 10. メール以外の通知手段（LINE / Slack など）
 
