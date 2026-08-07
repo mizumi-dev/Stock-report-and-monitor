@@ -22,15 +22,23 @@ landing-preview Lambda ハンドラ
 - **メール登録の案内はページ下部のみ**。導入部(_intro_html)ではメール配信機能に
   一切触れず、このページ自体の価値を先に伝える。個別銘柄の監視・メール受信を
   望む場合の案内は_signup_pitch_html()としてページ下部にのみ置く
-- **申込みフォームはこのLambdaでは処理しない**。本番register-stockの申込み
-  ページへの単純なリンクを置くだけで、実際の登録処理・ダブルオプトイン等の
-  ロジックは一切複製しない(単一の正本を保つため)
+- **申込みフォームの見た目はこのページに埋め込むが、処理は複製しない
+  (2026-08-07更新)**。メールアドレス入力欄をこのページ上に表示し、Webで
+  完結する体験にする。ただしフォームのaction属性はregister-stock
+  (app.pegsignal.com)を向けたmethod="GET"の素のHTMLフォームで、送信すると
+  ブラウザがそちらへ遷移する。実際の登録処理(重複チェック・トークン発行・
+  ダブルオプトインメール送信)は一切複製しない(単一の正本を保つため)。
+  唯一このLambda側でも生成しているのはCAPTCHA用の乱数2つで、
+  register-stock側の検証が完全にステートレス(URLパラメータ同士の突き合わせ)
+  なためどちらが生成しても安全に検証できる。乱数生成は書き込みを伴わないため
+  「読み取り専用」の設計原則は崩れない
 - **「割安」等の価値判断を示す表現を避ける**。PEGレシオという客観的な指標に
   基づく機械的な選定であることが伝わるよう、「PEGレシオが低い」という表現に
   統一する(金商法(投資助言業)リスク低減の方針、TODO.md参照)
 """
 import html
 import os
+import random
 
 import boto3
 
@@ -178,12 +186,23 @@ def _mode_section_html(mode: str, lang: str, register_base_url: str) -> str:
 
 
 def _signup_pitch_html(lang: str, register_url: str) -> str:
-    """個別銘柄の監視・メール配信は登録が必要である旨を説明し、既存の申込みページへ
-    誘導する。実際の登録フォーム(メール入力+bot対策の確認)はregister-stock(本番)
-    が持つ唯一の実装であり、ここでは複製しない(ここに簡易フォームを置いて
-    action属性だけ向けると、確認なしの送信になり本番側でエラーになるため、
-    単純なリンクで正規の申込みページへ誘導する)。"""
+    """個別銘柄の監視・メール配信は登録が必要である旨を説明し、その場でメール
+    アドレスを入力して申し込めるフォームを埋め込む(2026-08-07、apex切替に伴い
+    「Webで完結させたい」というユーザー要望を受けて追加)。
+
+    実際の登録処理(重複チェック・トークン発行・ダブルオプトインメール送信)は
+    register-stock(本番、app.pegsignal.com)が持つ唯一の実装のままで、ここでは
+    一切複製しない。フォームのaction属性をregister-stockのURLに向けた
+    method="GET"の素のHTMLフォームにすることで、送信するとブラウザが
+    app.pegsignal.comへ遷移し、そちらの実処理がそのまま動く(JS・CORS不要)。
+
+    唯一このLambda側でも生成しているのはCAPTCHA用の2つの乱数(n1・n2)。
+    register-stock側の検証はn1+n2と回答を突き合わせるだけの完全にステートレスな
+    ロジック(セッション等を参照しない)なので、どちらのLambdaが生成しても
+    安全に検証できる。書き込みは一切発生しないため、landing-previewの
+    「読み取り専用」設計(CLAUDE.md参照)は崩れない。"""
     url = html.escape(register_url)
+    n1, n2 = random.randint(1, 9), random.randint(1, 9)
     if lang == LANG_EN:
         return f"""
         <div class="notice-box">
@@ -192,9 +211,19 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
         pick individual stocks to watch, get daily/weekly/monthly trend &amp; momentum
         alerts on them, and receive this selection report by email on your chosen
         schedule.</p>
-        <p><a class="btn-link" href="{url}?lang=en">Sign up (free) →</a></p>
+        <form method="GET" action="{url}">
+          <input type="hidden" name="lang" value="en">
+          <input name="signup_email" type="email" placeholder="example@example.com"
+                 style="width:100%;" required>
+          <p>Quick check: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
+          <input type="hidden" name="captcha_n1" value="{n1}">
+          <input type="hidden" name="captcha_n2" value="{n2}">
+          <button type="submit">Sign up (free)</button>
+        </form>
         <p class="muted">Your email is used only to deliver reports and your access link,
-        and is never shared with third parties.
+        and is never shared with third parties. By signing up you agree to our
+        <a href="{url}?terms=1&amp;lang=en">Terms</a> and
+        <a href="{url}?privacy=1&amp;lang=en">Privacy Policy</a>.
         <a href="{url}?guide=1&amp;lang=en">See how it works, with pictures →</a></p>
         </div>
         """
@@ -204,9 +233,18 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     <p>このページは常に「最新の上位銘柄」だけを表示します。登録（無料）すると、
     追加で以下が使えるようになります: 気になる銘柄を選んで監視・トレンド/モメンタム
     の変化を通知・この選定レポートを選んだ頻度でメール受信。</p>
-    <p><a class="btn-link" href="{url}">申し込む（無料） →</a></p>
+    <form method="GET" action="{url}">
+      <input name="signup_email" type="email" placeholder="example@example.com"
+             style="width:100%;" required>
+      <p>簡単な確認: {n1} + {n2} = <input name="captcha_answer" style="width:60px;" required></p>
+      <input type="hidden" name="captcha_n1" value="{n1}">
+      <input type="hidden" name="captcha_n2" value="{n2}">
+      <button type="submit">申し込む（無料）</button>
+    </form>
     <p class="muted">登録いただくメールアドレスはレポート配信・ログイン用リンクの
-    送信にのみ使用し、第三者への提供は行いません。
+    送信にのみ使用し、第三者への提供は行いません。お申込みは
+    <a href="{url}?terms=1">利用規約</a>・<a href="{url}?privacy=1">プライバシーポリシー</a>
+    への同意とみなされます。
     <a href="{url}?guide=1">図でわかる使い方ガイドを見る →</a></p>
     </div>
     """

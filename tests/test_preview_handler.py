@@ -110,11 +110,44 @@ class TestPreviewPage:
         body = ph.handler(_event(), None)["body"]
         assert "監視リストに登録" not in body
 
-    def test_signup_cta_links_to_production_register_url(self, ph):
-        """実際の登録処理は複製せず、本番register-stockへリンクするだけ"""
+    def test_signup_form_submits_to_production_register_url(self, ph):
+        """実際の登録処理は複製せず、フォームのaction属性で本番register-stock
+        へ遷移させるだけ(2026-08-07、埋め込みフォームに変更)"""
         _put_snapshot(ph, "SHORT")
         body = ph.handler(_event(), None)["body"]
-        assert 'href="https://pegsignal.com/"' in body
+        assert '<form method="GET" action="https://pegsignal.com/">' in body
+
+    def test_embedded_signup_form_has_matching_email_and_captcha_fields(self, ph):
+        """register-stock側の検証(signup_email・captcha_n1・captcha_n2・
+        captcha_answer)と同じフィールド名を使う必要がある。n1+n2=captcha_answerの
+        関係も、register-stockが期待する形と一致させる"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(), None)["body"]
+        assert 'name="signup_email"' in body
+        m1 = re.search(r'name="captcha_n1" value="(\d+)"', body)
+        m2 = re.search(r'name="captcha_n2" value="(\d+)"', body)
+        assert m1 and m2
+        n1, n2 = int(m1.group(1)), int(m2.group(1))
+        assert 1 <= n1 <= 9
+        assert 1 <= n2 <= 9
+
+    def test_embedded_signup_form_english_includes_lang_param(self, ph):
+        """app.pegsignal.comにはX-Site-Langヘッダーが無いため、英語版フォームは
+        ?lang=enを明示的に送信して言語を維持する必要がある"""
+        _put_snapshot(ph, "SHORT")
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert '<input type="hidden" name="lang" value="en">' in body
+
+    def test_embedded_signup_form_generates_fresh_captcha_each_request(self, ph):
+        """毎回同じ数字だと固定パターンでbotに突破されうるため、リクエストごとに
+        乱数を生成し直すこと(register-stockの既存フォームと同じ方針)"""
+        _put_snapshot(ph, "SHORT")
+        n1s = set()
+        for _ in range(20):
+            body = ph.handler(_event(), None)["body"]
+            m = re.search(r'name="captcha_n1" value="(\d+)"', body)
+            n1s.add(m.group(1))
+        assert len(n1s) > 1
 
     def test_h1_does_not_claim_today_since_frequency_varies_by_period(self, ph):
         """短期=毎営業日・中期=週1・長期=月1と更新頻度が期間で異なるため、
