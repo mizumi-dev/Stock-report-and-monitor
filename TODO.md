@@ -237,9 +237,13 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
 - pytestは全て通過（config/data_sources/daily-batch/register-stock/report各層）
 
 **未実施（次点）**:
-- daily-batch-devでの実データ動作確認（実際にS&P500ユニバースでスキャン・
-  メール送信まで通しで走らせる。Lambdaタイムアウトは900秒でTODO#3の実測
-  （S&P500推定70〜90秒）に対し十分な余裕はあるが、実運用での確認は未実施）
+- ~~daily-batch-devでの実データ動作確認~~ → 対応済み(2026-08-07)。
+  `_test_scan_universe`診断フックでdaily-batch-dev上から実際に
+  `_scan_universe("MID", "SP500")`を実行。Wikipedia構成銘柄取得→並列データ
+  取得(500銘柄)→ランキング→スナップショット保存まで一気通貫で成功
+  (所要88.38秒、Lambdaタイムアウト900秒に対し十分な余裕。ランキング上位は
+  HIG・MU・ON・CVS・TPR、いずれもPEG 0.3以下)。メール送信までの通し確認
+  (`send_selection_report_now`)はまだ実施していない(次点)
 - ~~info/guideページ等の説明文がNASDAQ100決め打ちのままの箇所がないかの確認~~ →
   対応済み(2026-08-07)。サイトタイトル・meta description・トップ見出し・
   運営者情報・使い方ガイド・この仕組みについて、のNASDAQ100決め打ち箇所を
