@@ -5,6 +5,51 @@
 
 最終更新: 2026-08-07
 
+## landing-previewの本番ドメイン統合（2026-08-07、解決）
+
+`landing-preview`(メール登録不要で選定レポートを読める読み取り専用ページ、
+2026-08-06追加)は、本番ドメイン(pegsignal.com)には未接続の独立URLのまま
+だった。ユーザーから「登録不要で見れて、メール登録すれば監視レポートも
+使える仕様はどこへ行った？」との確認を受け、統合方法をexpert-panel-review
+で検討した。
+
+**検討した選択肢**:
+- (A) CloudFrontに2つ目のオリジンを追加しパスベース(`/preview*`)で振り分け
+- (B) landing-previewのロジックをregister-stockへ移植し統合
+- (C) サブドメイン(`preview.pegsignal.com`)方式で、`en.pegsignal.com`と同じ
+  独立ディストリビューションパターンを流用
+
+**採用したのは(C)**。理由: (A)(B)はいずれも本番の`pegsignal.com`ディストリ
+ビューションやLambdaプロセスに変更を加える必要があり、既に実ユーザーが
+いる本番の申込みフォーム等を巻き込むリスクがある。(C)は`pegsignal.com`本体
+には一切手を加えず、`en.pegsignal.com`で既に実証済みのプレイブック
+(`deploy_domain_en.sh`)を流用できる。また、landing-previewが書き込み権限
+ゼロの専用IAMロールを持つ独立Lambdaである設計(匿名トラフィックが最も
+集まる面を書き込み能力から隔離する)も維持できる。
+
+**実施内容**:
+- `deploy_domain_preview.sh`を新規作成(`deploy_domain_en.sh`と同じ構成)し実行。
+  ACM証明書(us-east-1)・CloudFrontディストリビューション(ID `EZW5FYV1PT3FO`)・
+  Route53 ALIASレコードを作成
+- register-stockに`PREVIEW_URL`環境変数を追加。設定されていれば申込み画面に
+  「登録せずに見る」リンクを表示(未設定時は何も表示しない)
+- 本番の`landing-preview`の`REGISTER_URL`を、生のLambda URLから
+  `https://pegsignal.com/`に修正(ブランド化されたリンクに)
+- 一時的にACM/CloudFront/Route53の管理ポリシーを`claude-deploy`にアタッチし、
+  作業完了後にdetach(deploy-scopedインラインポリシーがバイト上限に達していた
+  ため、一時タスク用に管理ポリシーのアタッチ/デタッチ方式を採用)
+
+**検証**: 開発環境(register-stock-dev)で「登録せずに見る」リンクの表示を実データ
+確認 → developで264件のテスト全通過を確認しmasterへPR(#36)・マージ →
+本番環境変数を設定 → `deploy_domain_preview.sh`実行 → CloudFront配信状態が
+`Deployed`になったことを確認 → 本番の`register-stock`・`landing-preview`を
+実際にinvokeし、リンクの相互接続(プレビューリンク・申込みリンク)を確認 →
+`pegsignal.com`本体のCloudFrontディストリビューション(ID `E3U35958A487A5`)が
+今回の作業中一切変更されていない(`LastModifiedTime`が作業前のまま)ことを
+確認。このサンドボックス環境からは外部ドメインへの直接HTTPアクセスが
+プロキシポリシーでブロックされているため、最終的な実ブラウザでの見た目確認は
+ユーザー自身に依頼
+
 ## 選定レポートの内容改善（2026-08-03、シグナル表示・要調査 → 2026-08-07、解決）
 
 実地確認で「シグナルが何を示すか分からなかった」との指摘。凡例・ラベルの追加、
