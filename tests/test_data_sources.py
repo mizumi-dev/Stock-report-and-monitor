@@ -98,3 +98,14 @@ class TestGetSp500Tickers:
         with mock.patch("data_sources.urllib.request.urlopen", return_value=_mock_urlopen(html)):
             result = get_sp500_tickers()
         assert len(result) == len(set(result))
+
+    def test_deduplicates_repeated_ticker_while_preserving_order(self):
+        """実データ検証(2026-08-07)で、ページ内の脚注等が原因と見られる重複
+        マッチ(IBMが2件)が発生することを確認した。原因のページ構造までは特定
+        していないが、順序を保ったまま重複除去することで安全に解消する。"""
+        tickers = _fake_tickers(449)
+        html = _fake_sp500_html(tickers + [tickers[100]])  # 101件目を意図的に重複させる
+        with mock.patch("data_sources.urllib.request.urlopen", return_value=_mock_urlopen(html)):
+            result = get_sp500_tickers()
+        assert result == tickers
+        assert len(result) == len(set(result))

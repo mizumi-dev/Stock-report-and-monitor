@@ -67,6 +67,10 @@ def get_sp500_tickers(fallback: list[str] | None = None) -> list[str]:
         # yfinance側の表記に合わせ、"BRK.B"のようなピリオドはハイフンに変換する
         # (yfinanceはクラス株をBRK-Bのように表記する)
         tickers = [t.replace(".", "-") for t in tickers]
+        # 実データ検証(2026-08-07)で、ページ内の脚注等により1銘柄だけ重複して
+        # マッチすることがあると判明した。原因のページ構造までは特定していないが、
+        # 実害としては重複除去で十分安全に解消できるため、順序を保ったまま除去する
+        tickers = list(dict.fromkeys(tickers))
         if len(tickers) < 400:  # 500件のはずが大幅に少ない場合はパース失敗とみなす
             raise ValueError(f"取得件数が少なすぎる({len(tickers)}件)")
         return tickers
