@@ -51,7 +51,7 @@ sleep 10
 
 echo "=== 2. Lambda作成 + Function URL発行 ==="
 rm -f preview.zip
-(cd "$PREVIEW_DIR" && zip "$OLDPWD/preview.zip" handler.py > /dev/null)
+(cd "$PREVIEW_DIR" && zip "$OLDPWD/preview.zip" handler.py og-image.jpg > /dev/null)
 zip -j preview.zip config.py report.py > /dev/null
 
 aws lambda create-function \

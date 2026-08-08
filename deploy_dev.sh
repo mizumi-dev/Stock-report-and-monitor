@@ -188,7 +188,7 @@ aws lambda update-function-configuration --function-name register-stock-dev \
 
 echo "=== 6. landing-preview-dev Lambda作成 + Function URL発行 ==="
 rm -f preview_dev.zip
-(cd "$PREVIEW_DIR" && zip "$OLDPWD/preview_dev.zip" handler.py > /dev/null)
+(cd "$PREVIEW_DIR" && zip "$OLDPWD/preview_dev.zip" handler.py og-image.jpg > /dev/null)
 zip -j preview_dev.zip config.py report.py > /dev/null
 
 aws lambda create-function \

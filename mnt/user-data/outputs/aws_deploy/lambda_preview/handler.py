@@ -42,6 +42,7 @@ landing-preview Lambda ハンドラ
   読み取り専用の方式にする(このページはログイン不要・書き込み一切なしの
   設計原則を維持するため)。切替リンクは_universe_nav_html()が生成する
 """
+import base64
 import html
 import os
 import random
@@ -379,10 +380,50 @@ _OG_DESCRIPTION = {
         "PEG ratio, ranked across short/mid/long-term horizons — no signup needed to read it."
     ),
 }
-OG_IMAGE_URL = os.environ.get("OG_IMAGE_URL", "")
+# シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。deploy.yml・
+# deploy_preview.sh・deploy_dev.shがhandler.pyと同じディレクトリからzipへ
+# 同梱するため、__file__基準でこのファイル自身の隣を見れば本番・開発どちらの
+# デプロイでも同じパスで見つかる。og:imageの絶対URLは環境変数OG_IMAGE_URLで
+# 明示的に上書きしない限り、リクエストのHostヘッダーから
+# "https://<host>/og-image.jpg" を都度組み立てる(ドメイン統合後の
+# pegsignal.com/en.pegsignal.com/pegsignal-dev.com等、どのホストでも
+# 追加設定なしに動くようにするため)
+_OG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "og-image.jpg")
+_OG_IMAGE_ROUTE = "/og-image.jpg"
+OG_IMAGE_URL_OVERRIDE = os.environ.get("OG_IMAGE_URL", "")
 
 
-def _page(inner_html: str, lang: str, universe: str, status: int = 200, canonical_url: str = "") -> dict:
+def _load_og_image_bytes() -> bytes:
+    try:
+        with open(_OG_IMAGE_PATH, "rb") as f:
+            return f.read()
+    except OSError as e:
+        print(f"[WARN] シェア用画像の読み込みに失敗: {e}")
+        return b""
+
+
+_OG_IMAGE_BYTES = _load_og_image_bytes()
+
+
+def _og_image_response() -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"},
+        "body": base64.b64encode(_OG_IMAGE_BYTES).decode("ascii"),
+        "isBase64Encoded": True,
+    }
+
+
+def _resolve_og_image_url(host: str) -> str:
+    if OG_IMAGE_URL_OVERRIDE:
+        return OG_IMAGE_URL_OVERRIDE
+    if host and _OG_IMAGE_BYTES:
+        return f"https://{host}{_OG_IMAGE_ROUTE}"
+    return ""
+
+
+def _page(inner_html: str, lang: str, universe: str, status: int = 200,
+          canonical_url: str = "", og_image_url: str = "") -> dict:
     preset = UNIVERSES[universe]
     title = (f"PegSignal — {preset['label_en']} PEG screening results"
              if lang == LANG_EN else f"PegSignal — {preset['label']} PEGスクリーニング結果")
@@ -399,8 +440,8 @@ def _page(inner_html: str, lang: str, universe: str, status: int = 200, canonica
     if canonical_url:
         og_tags.append(f'<meta property="og:url" content="{html.escape(canonical_url)}">')
         og_tags.append(f'<link rel="canonical" href="{html.escape(canonical_url)}">')
-    if OG_IMAGE_URL:
-        og_tags.append(f'<meta property="og:image" content="{html.escape(OG_IMAGE_URL)}">')
+    if og_image_url:
+        og_tags.append(f'<meta property="og:image" content="{html.escape(og_image_url)}">')
         og_tags.append('<meta name="twitter:card" content="summary_large_image">')
     else:
         og_tags.append('<meta name="twitter:card" content="summary">')
@@ -440,6 +481,8 @@ def _is_probable_bot(user_agent: str) -> bool:
 def handler(event, context):
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
     headers = event.get("headers") or {}
+    if path == _OG_IMAGE_ROUTE and _OG_IMAGE_BYTES:
+        return _og_image_response()
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
     referer_raw = headers.get("referer") or headers.get("Referer") or ""
     referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
@@ -460,4 +503,5 @@ def handler(event, context):
     # されるURLをクリーンに保つため)
     host = (headers.get("host") or headers.get("Host") or "").strip()
     canonical_url = f"https://{host}{path}" if host else ""
-    return _page(inner, lang, universe, canonical_url=canonical_url)
+    og_image_url = _resolve_og_image_url(host)
+    return _page(inner, lang, universe, canonical_url=canonical_url, og_image_url=og_image_url)

@@ -121,12 +121,17 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   にOGP/Twitter Cardメタタグ(og:title・og:description・twitter:card・canonical)を
   追加。従来`pegsignal.com`へのリンクはSNS上で説明文の無い空のカードになって
   いた。あわせてregister-stock側と同じ`?src=`規約でのアクセスログ計測も追加
-  (どのチャネルが効いたか判別できるように)。テスト追加済み(`tests/test_preview_handler.py`)、
-  全296件パス確認済み
-- **未着手（画像アセット待ち）**: シェア用バナー画像(横長、og:image用)・
-  ロゴ(正方形、「PEG」のモノグラム)をGeminiで生成中。ファイル受領後、
-  `OG_IMAGE_URL`環境変数にセットする形で組み込む(画像が無くてもテキストのみの
-  カードとして投稿は可能なため、ブロッカーではない)
+  (どのチャネルが効いたか判別できるように)
+- **対応済み(2026-08-08)**: シェア用画像2枚をGeminiで生成(横長バナー・
+  「PEG」のモノグラムを使った正方形ロゴ)。バナーは1200×630のOGP標準サイズに
+  トリミング・JPEG圧縮(674KB→56KB)のうえ`mnt/user-data/outputs/aws_deploy/lambda_preview/og-image.jpg`
+  として同梱し、`/og-image.jpg`ルートでLambda自身が配信する。og:imageの
+  URLはリクエストのHostヘッダーから`https://<host>/og-image.jpg`を自動生成する
+  設計にしたため、環境変数の手動設定は不要(`OG_IMAGE_URL`で明示的に上書きも可能)。
+  `deploy.yml`・`deploy_preview.sh`・`deploy_dev.sh`のzip同梱にも反映済み。
+  正方形ロゴ(`docs/assets/pegsignal-icon-square.png`)はコードには組み込まず、
+  X等のプロフィール画像として手動でアップロードする想定。テスト追加済み
+  (`tests/test_preview_handler.py`)、全298件パス確認済み
 - **未着手（次のアクション）**: develop環境で動作確認後、ユーザー承認を経て
   master反映。反映後、note記事を最初に投稿(実データの表を本文に載せる)、
   X・Hacker Newsはその後

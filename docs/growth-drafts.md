@@ -140,12 +140,14 @@ project so any feedback is very welcome.
 - **対応済み**: landing-previewにOGP/Twitter Cardのメタタグ(og:title・
   og:description・twitter:card)を追加。今まで完全に空だったため、X等に
   リンクを貼ると説明文の無いカードになっていた
-- **未着手(画像アセット待ち)**: シェア用バナー画像(横長)・ロゴ(正方形、PEGの
-  モノグラム)をGeminiで生成中。ファイルが用意でき次第、Lambdaに組み込んで
-  `OG_IMAGE_URL`環境変数を設定する(画像無しでもテキストのみのカードとしては
-  投稿可能なので、画像取り込みは投稿のブロッカーではない)
+- **対応済み(2026-08-08)**: シェア用バナー画像(横長、og:image用)をLambdaに
+  組み込み済み。`pegsignal.com`へのリンクをX等に貼ると自動でバナー付きの
+  カードになる(`OG_IMAGE_URL`環境変数での明示的な指定は不要)。正方形の
+  PEGロゴ(`docs/assets/pegsignal-icon-square.png`)はX等のプロフィール画像に
+  手動でアップロードして使う
 - develop環境での動作確認・ユーザー承認後のmaster反映が必要(このリポジトリの
-  開発フロー、CLAUDE.md参照)
+  開発フロー、CLAUDE.md参照)。反映後にX/note/シェアカード確認ツール等で
+  実際のカード表示を確認すること
 
 ## 補足: 投稿タイミング・注意事項
 

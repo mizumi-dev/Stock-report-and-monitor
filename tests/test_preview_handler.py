@@ -431,7 +431,9 @@ class TestPreviewReadOnly:
 class TestPreviewShareMetaTags:
     """SNS(X/note等)にリンクを貼った際にタイトル・説明が空のカードになっていた問題への
     対応(2026-08-08)。og:title/og:description/twitter:cardが最低限出ることを確認する。
-    og:imageは画像アセット未確定のためOG_IMAGE_URL環境変数が無ければ出さない。"""
+    og:imageは、リクエストのHostヘッダーから自動的に自ドメインの/og-image.jpgを
+    組み立てる(バナー画像はhandler.pyと同じディレクトリにデプロイされる、
+    og-image.jpg参照)。OG_IMAGE_URL環境変数を設定すればそちらを優先する。"""
 
     def test_description_and_og_tags_present(self, ph):
         body = ph.handler(_event(), None)["body"]
@@ -440,17 +442,20 @@ class TestPreviewShareMetaTags:
         assert '<meta property="og:description" content="' in body
         assert '<meta name="twitter:title" content="' in body
 
-    def test_no_og_image_tag_when_env_var_unset(self, ph):
-        ph.OG_IMAGE_URL = ""
+    def test_no_og_image_tag_when_host_header_missing(self, ph):
         body = ph.handler(_event(), None)["body"]
         assert "og:image" not in body
         assert '<meta name="twitter:card" content="summary">' in body
 
-    def test_og_image_tag_present_when_env_var_set(self, ph):
-        ph.OG_IMAGE_URL = "https://pegsignal.com/og-image.png"
-        body = ph.handler(_event(), None)["body"]
-        assert '<meta property="og:image" content="https://pegsignal.com/og-image.png">' in body
+    def test_og_image_tag_auto_resolved_from_host_header(self, ph):
+        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
         assert '<meta name="twitter:card" content="summary_large_image">' in body
+
+    def test_og_image_url_override_takes_precedence_over_host(self, ph):
+        ph.OG_IMAGE_URL_OVERRIDE = "https://cdn.example.com/banner.png"
+        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
+        assert '<meta property="og:image" content="https://cdn.example.com/banner.png">' in body
 
     def test_canonical_and_og_url_use_host_header_without_query_string(self, ph):
         body = ph.handler(_event({"host": "pegsignal.com"}, src="note"), None)["body"]
@@ -466,6 +471,20 @@ class TestPreviewShareMetaTags:
     def test_description_switches_with_lang(self, ph):
         body_en = ph.handler(_event(lang="en"), None)["body"]
         assert "free service that screens NASDAQ100" in body_en
+
+
+class TestPreviewOgImageRoute:
+    """/og-image.jpgがバナー画像そのものを返すこと(2026-08-08追加)。この
+    ルートはDynamoDB等を一切参照しないため、_put_snapshotなしでも動作する。"""
+
+    def test_returns_the_bundled_jpeg(self, ph):
+        r = ph.handler({"rawPath": "/og-image.jpg"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "image/jpeg"
+        assert r["isBase64Encoded"] is True
+        import base64
+        assert base64.b64decode(r["body"]) == ph._OG_IMAGE_BYTES
+        assert len(ph._OG_IMAGE_BYTES) > 0
 
 
 class TestPreviewSrcTracking:
