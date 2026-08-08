@@ -63,7 +63,7 @@ jobs:
       # プレビューページ(本番register-stockとは別のLambda・別のURL、2026-08-06追加)
       - name: Build landing-preview zip
         run: |
-          (cd mnt/user-data/outputs/aws_deploy/lambda_preview && zip "$OLDPWD/preview.zip" handler.py og-image.jpg)
+          (cd mnt/user-data/outputs/aws_deploy/lambda_preview && zip "$OLDPWD/preview.zip" handler.py og-image.jpg og-image-en.jpg)
           zip -j preview.zip config.py report.py
 
       - name: Deploy daily-batch
