@@ -184,13 +184,36 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   `_resolve_og_image_url(lang)`が`_detect_lang()`の結果に応じて正しい
   ルート(`/og-image.jpg`or`/og-image-en.jpg`)を返すようにした。
   `deploy.yml`・`deploy_preview.sh`・`deploy_dev.sh`のzip同梱にも追加済み。
-  テスト追加、全302件パス確認済み
-- **未着手（次のアクション）**: 本番での最終確認(`https://pegsignal.com/`と
-  `https://pegsignal.com/?lang=en`それぞれのview-sourceで`og:image`が
-  対応する言語のバナーになっていること、`/og-image.jpg`・`/og-image-en.jpg`
-  がそれぞれ画像を返すこと)。**noteやXはOGPをURL単位でキャッシュするため、
-  修正前に一度埋め込んだURLは古い情報が残る**。再確認時はキャッシュを避ける
-  ため`?src=note`等を付けた別URLで試すか、各サービスのカード検証ツールを使うこと。
+  テスト追加、全302件パス確認済み。**本番反映・デプロイ成功も確認済み**
+- **不具合と修正(2026-08-08、上記の本番確認中にユーザーが発見)**:
+  `https://pegsignal.com/?lang=en`にアクセスしても日本語表示のままになる
+  不具合が判明(og:imageの言語出し分けとは別件、今回の集客対応で偶然見つかった
+  既存バグ)。原因:
+  1. `pegsignal.com`のCloudFrontは`en.pegsignal.com`との対称性のため、
+     `X-Site-Lang: ja`ヘッダーを全リクエストに固定で付与している
+     (`deploy_patch_ja_lang_header.sh`)
+  2. `landing-preview`の`_detect_lang()`はこのヘッダーを`?lang=`クエリより
+     **優先**して見る実装だった(register-stock側のロジックをそのまま
+     踏襲したため)。register-stockはドメインごとにヘッダーが変わる構成
+     (`app.pegsignal.com`/`en.pegsignal.com`)なのでヘッダー優先で正しいが、
+     landing-previewは`pegsignal.com`一本(en側のサブドメインを持たない)で、
+     英語表示は`?lang=en`クエリのみで切り替える設計(`docs/growth-drafts.md`
+     参照)。ヘッダーが常に`ja`を送ってくるため、`?lang=en`が黙って無視されて
+     英語版が永久に表示できない状態だった
+  - **修正**: `_detect_lang()`の優先順位を反転し、`?lang=`クエリを
+    `X-Site-Lang`ヘッダーより優先するようにした。register-stock側は今回変更
+    していない(ドメインで言語が決まる構成のままで問題ないため)
+  - **教訓**: 同じ関数名・似た役割のロジックでも、Lambdaごとにドメイン構成が
+    違えば優先順位も変えるべき。コピーしたロジックをそのまま流用したことが
+    原因だった
+- **未着手（次のアクション）**: 上記2件(og:imageの言語出し分け、
+  `_detect_lang()`の優先順位修正)をdevelop→master反映し、本番で最終確認。
+  `https://pegsignal.com/`と`https://pegsignal.com/?lang=en`それぞれの
+  view-sourceで`<html lang=`とog:imageが対応する言語になっていること、
+  `/og-image.jpg`・`/og-image-en.jpg`がそれぞれ画像を返すことを確認。
+  **noteやXはOGPをURL単位でキャッシュするため、修正前に一度埋め込んだURLは
+  古い情報が残る**。再確認時はキャッシュを避けるため`?src=note`等を付けた
+  別URLで試すか、各サービスのカード検証ツールを使うこと。
   確認後、note記事を最初に投稿(実データの表を本文に載せる)、X・Hacker Newsはその後
 
 ## 開発環境と本番環境の分離（2026-08-07）
