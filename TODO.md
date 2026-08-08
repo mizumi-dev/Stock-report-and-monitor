@@ -163,12 +163,34 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   - **教訓**: CloudFront + Lambda Function URL構成では、Hostヘッダーから
     自ドメインを推測してはいけない。ドメイン依存の値は明示的に持つか、
     `X-Site-Lang`と同様にCloudFrontのオリジンカスタムヘッダーで渡す
-- **未着手（次のアクション）**: 上記修正のmaster反映と、本番での最終確認
-  (`https://pegsignal.com/`のview-sourceで`og:image`が`https://pegsignal.com/og-image.jpg`
-  になっていること、`/og-image.jpg`が画像を返すこと)。
-  **noteやXはOGPをURL単位でキャッシュするため、修正前に一度埋め込んだURLは
-  古い情報が残る**。再確認時はキャッシュを避けるため`?src=note`等を付けた
-  別URLで試すか、各サービスのカード検証ツールを使うこと。
+- **対応済み(2026-08-08)**: 上記修正をmaster反映・本番デプロイ成功を確認済み
+- **対応済み(2026-08-08)**: バナー左側の余白(画像生成プロンプトで「後でテキストを
+  重ねる想定」としていたが、合成自体を行っていなかった)にPillowでロゴ・
+  コピーを合成。ユーザーとの数回のやり取りで文言を調整し、最終的に:
+  - 見出し「重要指標を定期報告」
+  - 補足「PEGが低い成長株を無料で定期更新・登録不要」(登録の有無に関わらず
+    常に真である「定期更新」を採用。「定期配信」は登録者限定の機能なので
+    誤解を招くため避けた)
+  - 登録メリットを箇条書き2点(実際の送信ロジック`handler.py`の
+    `run_selection_reports`/`run_monitoring_reports`に対応させた正確な内容):
+    「✓ 登録するとスクリーニング結果を定期配信」「✓ 銘柄監視レポートも配信」
+  フォントはOutfit-Bold(欧文)・IPAゴシック(和文)、配色はサイトの既存パレット。
+  この変更はコード変更を伴わない画像アセットのみだったため、通常のPR経由で
+  develop→master反映済み
+- **対応済み(2026-08-08)**: 英語ページ(`?lang=en`)に日本語バナーが出てしまう
+  問題を修正。バナーを言語ごとに分離(`og-image.jpg`=日本語、
+  `og-image-en.jpg`=英語、英語版はOutfit-Regular/Boldで統一)。
+  `handler.py`の`_OG_IMAGE_BYTES`等を`lang`をキーにした辞書に変更し、
+  `_resolve_og_image_url(lang)`が`_detect_lang()`の結果に応じて正しい
+  ルート(`/og-image.jpg`or`/og-image-en.jpg`)を返すようにした。
+  `deploy.yml`・`deploy_preview.sh`・`deploy_dev.sh`のzip同梱にも追加済み。
+  テスト追加、全302件パス確認済み
+- **未着手（次のアクション）**: 本番での最終確認(`https://pegsignal.com/`と
+  `https://pegsignal.com/?lang=en`それぞれのview-sourceで`og:image`が
+  対応する言語のバナーになっていること、`/og-image.jpg`・`/og-image-en.jpg`
+  がそれぞれ画像を返すこと)。**noteやXはOGPをURL単位でキャッシュするため、
+  修正前に一度埋め込んだURLは古い情報が残る**。再確認時はキャッシュを避ける
+  ため`?src=note`等を付けた別URLで試すか、各サービスのカード検証ツールを使うこと。
   確認後、note記事を最初に投稿(実データの表を本文に載せる)、X・Hacker Newsはその後
 
 ## 開発環境と本番環境の分離（2026-08-07）
