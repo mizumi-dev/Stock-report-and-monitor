@@ -435,7 +435,10 @@ class TestPreviewShareMetaTags:
     og:url・canonical・og:imageのホスト名は**HostヘッダーではなくPUBLIC_ORIGINを
     使う**。CloudFrontがAllViewerExceptHostHeaderポリシーでHostを転送しないため、
     Hostから組み立てると生のLambda Function URLを指してしまうため
-    (handler.pyのPUBLIC_ORIGIN定義箇所のコメント参照)。"""
+    (handler.pyのPUBLIC_ORIGIN定義箇所のコメント参照)。
+
+    og:imageは言語ごとに別バナー(日本語=/og-image.jpg、英語=/og-image-en.jpg)を
+    出す(2026-08-08、英語ページに日本語文言のバナーが出ていた不具合の修正)。"""
 
     def test_description_and_og_tags_present(self, ph):
         body = ph.handler(_event(), None)["body"]
@@ -444,7 +447,7 @@ class TestPreviewShareMetaTags:
         assert '<meta property="og:description" content="' in body
         assert '<meta name="twitter:title" content="' in body
 
-    def test_og_image_uses_public_origin_not_host_header(self, ph):
+    def test_ja_page_uses_ja_banner(self, ph):
         """CloudFront経由ではHostが生のLambda URLになるため、それを使ってはいけない"""
         body = ph.handler(
             _event({"host": "abc123.lambda-url.us-east-1.on.aws"}), None
@@ -453,12 +456,16 @@ class TestPreviewShareMetaTags:
         assert '<meta name="twitter:card" content="summary_large_image">' in body
         assert "lambda-url" not in body
 
+    def test_en_page_uses_en_banner_not_ja(self, ph):
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image-en.jpg">' in body
+
     def test_og_image_emitted_even_without_host_header(self, ph):
         body = ph.handler(_event(), None)["body"]
         assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
 
     def test_no_og_image_tag_when_banner_missing(self, ph):
-        ph._OG_IMAGE_BYTES = b""
+        ph._OG_IMAGE_BYTES = {"ja": b"", "en": b""}
         body = ph.handler(_event(), None)["body"]
         assert "og:image" not in body
         assert '<meta name="twitter:card" content="summary">' in body
@@ -487,17 +494,29 @@ class TestPreviewShareMetaTags:
 
 
 class TestPreviewOgImageRoute:
-    """/og-image.jpgがバナー画像そのものを返すこと(2026-08-08追加)。この
-    ルートはDynamoDB等を一切参照しないため、_put_snapshotなしでも動作する。"""
+    """/og-image.jpg(日本語)・/og-image-en.jpg(英語)がそれぞれのバナー画像を
+    返すこと(2026-08-08追加、英語版は同日に言語別対応)。このルートはDynamoDB等を
+    一切参照しないため、_put_snapshotなしでも動作する。"""
 
-    def test_returns_the_bundled_jpeg(self, ph):
+    def test_returns_the_bundled_ja_jpeg(self, ph):
         r = ph.handler({"rawPath": "/og-image.jpg"}, None)
         assert r["statusCode"] == 200
         assert r["headers"]["Content-Type"] == "image/jpeg"
         assert r["isBase64Encoded"] is True
         import base64
-        assert base64.b64decode(r["body"]) == ph._OG_IMAGE_BYTES
-        assert len(ph._OG_IMAGE_BYTES) > 0
+        assert base64.b64decode(r["body"]) == ph._OG_IMAGE_BYTES["ja"]
+        assert len(ph._OG_IMAGE_BYTES["ja"]) > 0
+
+    def test_returns_the_bundled_en_jpeg(self, ph):
+        r = ph.handler({"rawPath": "/og-image-en.jpg"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "image/jpeg"
+        import base64
+        assert base64.b64decode(r["body"]) == ph._OG_IMAGE_BYTES["en"]
+        assert len(ph._OG_IMAGE_BYTES["en"]) > 0
+
+    def test_ja_and_en_banners_are_different_images(self, ph):
+        assert ph._OG_IMAGE_BYTES["ja"] != ph._OG_IMAGE_BYTES["en"]
 
 
 class TestPreviewSrcTracking:

@@ -398,41 +398,44 @@ _OG_DESCRIPTION = {
 # あるが、既定値のままでも本番(pegsignal.com)は正しく動く。
 PUBLIC_ORIGIN = os.environ.get("SITE_URL", "https://pegsignal.com").rstrip("/")
 
-# シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。deploy.yml・
-# deploy_preview.sh・deploy_dev.shがhandler.pyと同じディレクトリからzipへ
-# 同梱するため、__file__基準でこのファイル自身の隣を見れば本番・開発どちらの
-# デプロイでも同じパスで見つかる。画像はこのLambda自身が_OG_IMAGE_ROUTEで配信する
-_OG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "og-image.jpg")
-_OG_IMAGE_ROUTE = "/og-image.jpg"
+# シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。日本語版・英語版で
+# バナー内の文言が異なる(和文合成/欧文合成)ため、言語ごとに別ファイル・別ルートを
+# 持つ(2026-08-08、英語ページに日本語バナーが出ていた不具合を修正)。deploy.yml・
+# deploy_preview.sh・deploy_dev.shがhandler.pyと同じディレクトリからzipへ同梱する
+# ため、__file__基準でこのファイル自身の隣を見れば本番・開発どちらのデプロイでも
+# 同じパスで見つかる。画像はこのLambda自身が_OG_IMAGE_ROUTESで配信する
+_OG_IMAGE_ROUTES = {LANG_JA: "/og-image.jpg", LANG_EN: "/og-image-en.jpg"}
+_OG_IMAGE_FILENAMES = {LANG_JA: "og-image.jpg", LANG_EN: "og-image-en.jpg"}
 OG_IMAGE_URL_OVERRIDE = os.environ.get("OG_IMAGE_URL", "")
 
 
-def _load_og_image_bytes() -> bytes:
+def _load_og_image_bytes(lang: str) -> bytes:
+    path = os.path.join(os.path.dirname(__file__), _OG_IMAGE_FILENAMES[lang])
     try:
-        with open(_OG_IMAGE_PATH, "rb") as f:
+        with open(path, "rb") as f:
             return f.read()
     except OSError as e:
-        print(f"[WARN] シェア用画像の読み込みに失敗: {e}")
+        print(f"[WARN] シェア用画像({lang})の読み込みに失敗: {e}")
         return b""
 
 
-_OG_IMAGE_BYTES = _load_og_image_bytes()
+_OG_IMAGE_BYTES = {lang: _load_og_image_bytes(lang) for lang in SUPPORTED_LANGS}
 
 
-def _og_image_response() -> dict:
+def _og_image_response(lang: str) -> dict:
     return {
         "statusCode": 200,
         "headers": {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"},
-        "body": base64.b64encode(_OG_IMAGE_BYTES).decode("ascii"),
+        "body": base64.b64encode(_OG_IMAGE_BYTES[lang]).decode("ascii"),
         "isBase64Encoded": True,
     }
 
 
-def _resolve_og_image_url() -> str:
+def _resolve_og_image_url(lang: str) -> str:
     if OG_IMAGE_URL_OVERRIDE:
         return OG_IMAGE_URL_OVERRIDE
-    if _OG_IMAGE_BYTES:
-        return f"{PUBLIC_ORIGIN}{_OG_IMAGE_ROUTE}"
+    if _OG_IMAGE_BYTES.get(lang):
+        return f"{PUBLIC_ORIGIN}{_OG_IMAGE_ROUTES[lang]}"
     return ""
 
 
@@ -495,8 +498,10 @@ def _is_probable_bot(user_agent: str) -> bool:
 def handler(event, context):
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
     headers = event.get("headers") or {}
-    if path == _OG_IMAGE_ROUTE and _OG_IMAGE_BYTES:
-        return _og_image_response()
+    if path in _OG_IMAGE_ROUTES.values():
+        image_lang = LANG_EN if path == _OG_IMAGE_ROUTES[LANG_EN] else LANG_JA
+        if _OG_IMAGE_BYTES.get(image_lang):
+            return _og_image_response(image_lang)
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
     referer_raw = headers.get("referer") or headers.get("Referer") or ""
     referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
@@ -517,5 +522,5 @@ def handler(event, context):
     # されるURLをクリーンに保つため)。ホスト名はHostヘッダーではなく
     # PUBLIC_ORIGINを使う(理由はPUBLIC_ORIGINの定義箇所のコメントを参照)
     canonical_url = f"{PUBLIC_ORIGIN}{path}"
-    og_image_url = _resolve_og_image_url()
+    og_image_url = _resolve_og_image_url(lang)
     return _page(inner, lang, universe, canonical_url=canonical_url, og_image_url=og_image_url)
