@@ -42,9 +42,11 @@ landing-preview Lambda ハンドラ
   読み取り専用の方式にする(このページはログイン不要・書き込み一切なしの
   設計原則を維持するため)。切替リンクは_universe_nav_html()が生成する
 """
+import base64
 import html
 import os
 import random
+import re
 
 import boto3
 
@@ -363,14 +365,90 @@ def _signup_pitch_html(lang: str, register_url: str) -> str:
     """
 
 
-def _page(inner_html: str, lang: str, universe: str, status: int = 200) -> dict:
+# X/note等にリンクを貼った際のシェアカード用。今まで一切無く(空リンクプレビュー
+# になっていた)、集客チャネル展開の前提として2026-08-08に追加。og:imageは
+# OG_IMAGE_URL環境変数が設定されている場合のみ出力する(画像アセットが未確定
+# なため、無ければテキストのみのカードになる。register-stock側のfaviconのような
+# data URIはSNS側のクローラーが取得できないため使えない)
+_OG_DESCRIPTION = {
+    LANG_JA: (
+        "NASDAQ100・S&P500構成銘柄からPEGレシオが低い成長株を選定し、"
+        "短期・中期・長期でランキング。登録不要でそのまま見られる無料サービスです。"
+    ),
+    LANG_EN: (
+        "A free service that screens NASDAQ100 / S&P 500 constituents for growth stocks with a low "
+        "PEG ratio, ranked across short/mid/long-term horizons — no signup needed to read it."
+    ),
+}
+# シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。deploy.yml・
+# deploy_preview.sh・deploy_dev.shがhandler.pyと同じディレクトリからzipへ
+# 同梱するため、__file__基準でこのファイル自身の隣を見れば本番・開発どちらの
+# デプロイでも同じパスで見つかる。og:imageの絶対URLは環境変数OG_IMAGE_URLで
+# 明示的に上書きしない限り、リクエストのHostヘッダーから
+# "https://<host>/og-image.jpg" を都度組み立てる(ドメイン統合後の
+# pegsignal.com/en.pegsignal.com/pegsignal-dev.com等、どのホストでも
+# 追加設定なしに動くようにするため)
+_OG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "og-image.jpg")
+_OG_IMAGE_ROUTE = "/og-image.jpg"
+OG_IMAGE_URL_OVERRIDE = os.environ.get("OG_IMAGE_URL", "")
+
+
+def _load_og_image_bytes() -> bytes:
+    try:
+        with open(_OG_IMAGE_PATH, "rb") as f:
+            return f.read()
+    except OSError as e:
+        print(f"[WARN] シェア用画像の読み込みに失敗: {e}")
+        return b""
+
+
+_OG_IMAGE_BYTES = _load_og_image_bytes()
+
+
+def _og_image_response() -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"},
+        "body": base64.b64encode(_OG_IMAGE_BYTES).decode("ascii"),
+        "isBase64Encoded": True,
+    }
+
+
+def _resolve_og_image_url(host: str) -> str:
+    if OG_IMAGE_URL_OVERRIDE:
+        return OG_IMAGE_URL_OVERRIDE
+    if host and _OG_IMAGE_BYTES:
+        return f"https://{host}{_OG_IMAGE_ROUTE}"
+    return ""
+
+
+def _page(inner_html: str, lang: str, universe: str, status: int = 200,
+          canonical_url: str = "", og_image_url: str = "") -> dict:
     preset = UNIVERSES[universe]
     title = (f"PegSignal — {preset['label_en']} PEG screening results"
              if lang == LANG_EN else f"PegSignal — {preset['label']} PEGスクリーニング結果")
+    description = _OG_DESCRIPTION[lang]
     footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
+    og_tags = [
+        f'<meta name="description" content="{html.escape(description)}">',
+        '<meta property="og:type" content="website">',
+        f'<meta property="og:title" content="{html.escape(title)}">',
+        f'<meta property="og:description" content="{html.escape(description)}">',
+        f'<meta name="twitter:title" content="{html.escape(title)}">',
+        f'<meta name="twitter:description" content="{html.escape(description)}">',
+    ]
+    if canonical_url:
+        og_tags.append(f'<meta property="og:url" content="{html.escape(canonical_url)}">')
+        og_tags.append(f'<link rel="canonical" href="{html.escape(canonical_url)}">')
+    if og_image_url:
+        og_tags.append(f'<meta property="og:image" content="{html.escape(og_image_url)}">')
+        og_tags.append('<meta name="twitter:card" content="summary_large_image">')
+    else:
+        og_tags.append('<meta name="twitter:card" content="summary">')
     body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">
     <title>{title}</title>
+    {"".join(og_tags)}
     <style>{_PAGE_STYLE}</style></head>
     <body>
     <div class="card" id="top">
@@ -385,15 +463,45 @@ def _page(inner_html: str, lang: str, universe: str, status: int = 200) -> dict:
     }
 
 
+# register-stock側(lambda_register/handler.py)の_is_probable_bot/_access_log_fieldsと
+# 同じ規約(bot判定・?src=の流入元ラベル)をここにも揃える(2026-08-08、集客チャネル
+# 展開に向けてlanding-preview側にも計測を追加)。両Lambdaはhandler.py自体を共有しない
+# 設計(CLAUDE.md参照)のため、このファイル内に複製する
+_BOT_UA_SUBSTRINGS = (
+    "bot", "spider", "crawl", "scan", "curl/", "wget/", "python-requests",
+    "go-http-client", "scrapy", "java/", "libwww", "httpclient", "okhttp",
+    "postman", "insomnia", "sniffer", "nmap", "nikto", "masscan", "zgrab",
+)
+
+
+def _is_probable_bot(user_agent: str) -> bool:
+    return any(s in user_agent.lower() for s in _BOT_UA_SUBSTRINGS)
+
+
 def handler(event, context):
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
     headers = event.get("headers") or {}
+    if path == _OG_IMAGE_ROUTE and _OG_IMAGE_BYTES:
+        return _og_image_response()
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
-    print(f"[ACCESS] preview path={path!r} ua={user_agent!r}")
+    referer_raw = headers.get("referer") or headers.get("Referer") or ""
+    referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
+    params = event.get("queryStringParameters") or {}
+    # 告知文の?src=をそのまま流入元ラベルとして記録する(例: ?src=note, ?src=x, ?src=hn)。
+    # register-stock側と同じ規約(任意の英数字・アンダースコア・ハイフンのみ許可)
+    src_raw = (params.get("src") or "").strip()
+    src = src_raw if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", src_raw) else ""
+    print(f"[ACCESS] preview path={path!r} bot={_is_probable_bot(user_agent)} "
+          f"src={src!r} referer={referer!r} ua={user_agent!r}")
 
     lang = _detect_lang(event)
     universe = _detect_universe(event)
     sections = "".join(_mode_section_html(m, lang, universe, REGISTER_URL) for m in _MODES)
     inner = (_intro_html(lang, universe, REGISTER_URL) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
              + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL))
-    return _page(inner, lang, universe)
+    # og:url/canonicalはsrc等のトラッキングクエリを含めない(シェア・インデックス
+    # されるURLをクリーンに保つため)
+    host = (headers.get("host") or headers.get("Host") or "").strip()
+    canonical_url = f"https://{host}{path}" if host else ""
+    og_image_url = _resolve_og_image_url(host)
+    return _page(inner, lang, universe, canonical_url=canonical_url, og_image_url=og_image_url)

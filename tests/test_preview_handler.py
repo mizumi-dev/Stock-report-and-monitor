@@ -428,3 +428,87 @@ class TestPreviewReadOnly:
             del_spy.assert_not_called()
 
 
+class TestPreviewShareMetaTags:
+    """SNS(X/note等)にリンクを貼った際にタイトル・説明が空のカードになっていた問題への
+    対応(2026-08-08)。og:title/og:description/twitter:cardが最低限出ることを確認する。
+    og:imageは、リクエストのHostヘッダーから自動的に自ドメインの/og-image.jpgを
+    組み立てる(バナー画像はhandler.pyと同じディレクトリにデプロイされる、
+    og-image.jpg参照)。OG_IMAGE_URL環境変数を設定すればそちらを優先する。"""
+
+    def test_description_and_og_tags_present(self, ph):
+        body = ph.handler(_event(), None)["body"]
+        assert '<meta name="description" content="' in body
+        assert '<meta property="og:title" content="PegSignal' in body
+        assert '<meta property="og:description" content="' in body
+        assert '<meta name="twitter:title" content="' in body
+
+    def test_no_og_image_tag_when_host_header_missing(self, ph):
+        body = ph.handler(_event(), None)["body"]
+        assert "og:image" not in body
+        assert '<meta name="twitter:card" content="summary">' in body
+
+    def test_og_image_tag_auto_resolved_from_host_header(self, ph):
+        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
+        assert '<meta name="twitter:card" content="summary_large_image">' in body
+
+    def test_og_image_url_override_takes_precedence_over_host(self, ph):
+        ph.OG_IMAGE_URL_OVERRIDE = "https://cdn.example.com/banner.png"
+        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
+        assert '<meta property="og:image" content="https://cdn.example.com/banner.png">' in body
+
+    def test_canonical_and_og_url_use_host_header_without_query_string(self, ph):
+        body = ph.handler(_event({"host": "pegsignal.com"}, src="note"), None)["body"]
+        assert '<meta property="og:url" content="https://pegsignal.com/">' in body
+        assert '<link rel="canonical" href="https://pegsignal.com/">' in body
+        assert "src=note" not in body
+
+    def test_no_canonical_tag_when_host_header_missing(self, ph):
+        body = ph.handler(_event(), None)["body"]
+        assert "og:url" not in body
+        assert "rel=\"canonical\"" not in body
+
+    def test_description_switches_with_lang(self, ph):
+        body_en = ph.handler(_event(lang="en"), None)["body"]
+        assert "free service that screens NASDAQ100" in body_en
+
+
+class TestPreviewOgImageRoute:
+    """/og-image.jpgがバナー画像そのものを返すこと(2026-08-08追加)。この
+    ルートはDynamoDB等を一切参照しないため、_put_snapshotなしでも動作する。"""
+
+    def test_returns_the_bundled_jpeg(self, ph):
+        r = ph.handler({"rawPath": "/og-image.jpg"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "image/jpeg"
+        assert r["isBase64Encoded"] is True
+        import base64
+        assert base64.b64decode(r["body"]) == ph._OG_IMAGE_BYTES
+        assert len(ph._OG_IMAGE_BYTES) > 0
+
+
+class TestPreviewSrcTracking:
+    """告知文への?src=(例: note/x/hn)をアクセスログに残す。register-stock側の
+    ?src=規約(lambda_register/handler.py)と揃えている(2026-08-08追加)。"""
+
+    def test_valid_src_is_logged(self, ph, capsys):
+        ph.handler(_event(src="note"), None)
+        captured = capsys.readouterr()
+        assert "src='note'" in captured.out
+
+    def test_invalid_src_is_not_logged_as_is(self, ph, capsys):
+        ph.handler(_event(src="not valid!"), None)
+        captured = capsys.readouterr()
+        assert "src=''" in captured.out
+
+    def test_bot_user_agent_is_flagged(self, ph, capsys):
+        ph.handler(_event({"user-agent": "curl/8.0"}), None)
+        captured = capsys.readouterr()
+        assert "bot=True" in captured.out
+
+    def test_normal_user_agent_is_not_flagged(self, ph, capsys):
+        ph.handler(_event({"user-agent": "Mozilla/5.0"}), None)
+        captured = capsys.readouterr()
+        assert "bot=False" in captured.out
+
+

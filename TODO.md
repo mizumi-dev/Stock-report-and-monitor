@@ -1,6 +1,6 @@
 # 残課題
 
-最終更新: 2026-08-07
+最終更新: 2026-08-08(develop→masterのPR作成時点)
 
 完了したタスクは`TODO_ARCHIVE.md`に移動済み。ここには未着手・要検討の項目が
 残っているセクションのみを置く。
@@ -107,6 +107,49 @@
 実際の投稿はユーザー自身の判断・アカウントで行う。文面は`docs/growth-drafts.md`
 に用意した(note.com向け紹介記事案・X用の短文案・Hacker News "Show HN"向け英文案)。
 無償・投資助言でない旨は必ず残す(金商法対応の一貫性のため)。
+
+### 集客の実行フェーズ着手（2026-08-08）
+
+Claudeが「マネージャー兼メインプレイヤー」として展開作業を推進する運用を開始。
+チャネル・アカウントを決定し、投稿前の技術的な下準備に着手した。
+
+- **チャネル・アカウント決定**: note「お金はおっかねえ」(既存・投稿実績あり)、
+  X(同名義で個人開発アカウントを新規作成、PegSignal専用にはしない)、
+  Hacker News「Cashphobia」(新規作成済み、未投稿)。詳細は
+  `docs/growth-drafts.md`冒頭に記載
+- **対応済み**: landing-preview(`mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py`)
+  にOGP/Twitter Cardメタタグ(og:title・og:description・twitter:card・canonical)を
+  追加。従来`pegsignal.com`へのリンクはSNS上で説明文の無い空のカードになって
+  いた。あわせてregister-stock側と同じ`?src=`規約でのアクセスログ計測も追加
+  (どのチャネルが効いたか判別できるように)
+- **対応済み(2026-08-08)**: シェア用画像2枚をGeminiで生成(横長バナー・
+  「PEG」のモノグラムを使った正方形ロゴ)。バナーは1200×630のOGP標準サイズに
+  トリミング・JPEG圧縮(674KB→56KB)のうえ`mnt/user-data/outputs/aws_deploy/lambda_preview/og-image.jpg`
+  として同梱し、`/og-image.jpg`ルートでLambda自身が配信する。og:imageの
+  URLはリクエストのHostヘッダーから`https://<host>/og-image.jpg`を自動生成する
+  設計にしたため、環境変数の手動設定は不要(`OG_IMAGE_URL`で明示的に上書きも可能)。
+  `deploy.yml`・`deploy_preview.sh`・`deploy_dev.sh`のzip同梱にも反映済み。
+  正方形ロゴ(`docs/assets/pegsignal-icon-square.png`)はコードには組み込まず、
+  X等のプロフィール画像として手動でアップロードする想定。テスト追加済み
+  (`tests/test_preview_handler.py`)、全298件パス確認済み
+- **判明した既知の制約(2026-08-08)**: `deploy.yml`の`og-image.jpg`同梱をdevelop環境で
+  検証しようとしたところ、`/og-image.jpg`が404(og:imageタグ自体が出ない)になる
+  不具合を確認。原因はGitHub Actionsの`workflow_run`トリガーの仕様: **実行される
+  ワークフロー定義(steps)自体はデフォルトブランチ(`master`)にある版が使われ、
+  `actions/checkout`で指定したブランチ(develop)からはコードだけが取得される**。
+  今回、developの`deploy.yml`には`og-image.jpg`同梱の変更が入っていたが、
+  masterにはまだ無かったため、実行時は旧手順(`zip ... handler.py`のみ、
+  `og-image.jpg`無し)が使われてしまい、develop環境には反映されなかった
+  (Pythonコード側=handler.pyのOGP/画像配信ロジック自体はdevelopの最新版が
+  正しく使われている。zip同梱手順=deploy.yml側だけがこの制約を受ける)。
+  **今後deploy.yml自体を変更するときは、develop環境だけでは動作確認が
+  完結しない(masterに同じ変更が入るまでワークフロー定義が反映されない)ことに
+  注意する**。master反映後の本番デプロイでは、その時点でmasterの`deploy.yml`が
+  更新されているため正しく`og-image.jpg`が同梱される見込み
+- **未着手（次のアクション）**: 上記の制約により、この変更は develop 環境では
+  画像配信を完全には検証できなかった(コード自体は298件のテストで検証済み)。
+  ユーザー承認を経てmaster反映、反映後に本番で最終確認する。反映後、note記事を
+  最初に投稿(実データの表を本文に載せる)、X・Hacker Newsはその後
 
 ## 開発環境と本番環境の分離（2026-08-07）
 
