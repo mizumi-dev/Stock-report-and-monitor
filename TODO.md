@@ -125,9 +125,7 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
 - **対応済み(2026-08-08)**: シェア用画像2枚をGeminiで生成(横長バナー・
   「PEG」のモノグラムを使った正方形ロゴ)。バナーは1200×630のOGP標準サイズに
   トリミング・JPEG圧縮(674KB→56KB)のうえ`mnt/user-data/outputs/aws_deploy/lambda_preview/og-image.jpg`
-  として同梱し、`/og-image.jpg`ルートでLambda自身が配信する。og:imageの
-  URLはリクエストのHostヘッダーから`https://<host>/og-image.jpg`を自動生成する
-  設計にしたため、環境変数の手動設定は不要(`OG_IMAGE_URL`で明示的に上書きも可能)。
+  として同梱し、`/og-image.jpg`ルートでLambda自身が配信する。
   `deploy.yml`・`deploy_preview.sh`・`deploy_dev.sh`のzip同梱にも反映済み。
   正方形ロゴ(`docs/assets/pegsignal-icon-square.png`)はコードには組み込まず、
   X等のプロフィール画像として手動でアップロードする想定。テスト追加済み
@@ -146,10 +144,32 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   完結しない(masterに同じ変更が入るまでワークフロー定義が反映されない)ことに
   注意する**。master反映後の本番デプロイでは、その時点でmasterの`deploy.yml`が
   更新されているため正しく`og-image.jpg`が同梱される見込み
-- **未着手（次のアクション）**: 上記の制約により、この変更は develop 環境では
-  画像配信を完全には検証できなかった(コード自体は298件のテストで検証済み)。
-  ユーザー承認を経てmaster反映、反映後に本番で最終確認する。反映後、note記事を
-  最初に投稿(実データの表を本文に載せる)、X・Hacker Newsはその後
+- **不具合と修正(2026-08-08、本番反映後に発覚)**: 本番反映後もnoteの埋め込みで
+  シェアカードに画像が出ないとの報告を受けて調査し、**Claude側の実装ミス**と判明。
+  当初`og:image`・`og:url`・`canonical`をリクエストのHostヘッダーから組み立てる
+  実装にしていたが、この構成では成立しない。原因の連鎖:
+  1. このサービスのCloudFrontディストリビューションは全て、AWS管理のオリジン
+     リクエストポリシー**`AllViewerExceptHostHeader`**(ID `b689b0a8-...`)を
+     使っている(`deploy_domain.sh:122`ほか)。Lambda Function URLをオリジンに
+     する場合Hostはオリジン自身のドメインである必要があるため、**この設定自体は
+     正しい**
+  2. そのためCloudFront経由でLambdaが受け取るHostは常に生のFunction URLの
+     ホスト名(`xxxxx.lambda-url.us-east-1.on.aws`)であり、`pegsignal.com`ではない
+  3. 結果、ページは`og:image`/`og:url`/`canonical`を全て生Lambda URLで出力していた。
+     **`canonical`が生URLを指すのはSEO上、画像が出ないことより有害**
+  - **修正**: Hostヘッダー依存をやめ、公開オリジンを明示的に持つ定数
+    `PUBLIC_ORIGIN`(既定`https://pegsignal.com`、`SITE_URL`環境変数で上書き可)
+    を導入。同じ罠を再び踏まないよう、理由をhandler.pyのコメントとして残した
+  - **教訓**: CloudFront + Lambda Function URL構成では、Hostヘッダーから
+    自ドメインを推測してはいけない。ドメイン依存の値は明示的に持つか、
+    `X-Site-Lang`と同様にCloudFrontのオリジンカスタムヘッダーで渡す
+- **未着手（次のアクション）**: 上記修正のmaster反映と、本番での最終確認
+  (`https://pegsignal.com/`のview-sourceで`og:image`が`https://pegsignal.com/og-image.jpg`
+  になっていること、`/og-image.jpg`が画像を返すこと)。
+  **noteやXはOGPをURL単位でキャッシュするため、修正前に一度埋め込んだURLは
+  古い情報が残る**。再確認時はキャッシュを避けるため`?src=note`等を付けた
+  別URLで試すか、各サービスのカード検証ツールを使うこと。
+  確認後、note記事を最初に投稿(実データの表を本文に載せる)、X・Hacker Newsはその後
 
 ## 開発環境と本番環境の分離（2026-08-07）
 

@@ -431,9 +431,11 @@ class TestPreviewReadOnly:
 class TestPreviewShareMetaTags:
     """SNS(X/note等)にリンクを貼った際にタイトル・説明が空のカードになっていた問題への
     対応(2026-08-08)。og:title/og:description/twitter:cardが最低限出ることを確認する。
-    og:imageは、リクエストのHostヘッダーから自動的に自ドメインの/og-image.jpgを
-    組み立てる(バナー画像はhandler.pyと同じディレクトリにデプロイされる、
-    og-image.jpg参照)。OG_IMAGE_URL環境変数を設定すればそちらを優先する。"""
+
+    og:url・canonical・og:imageのホスト名は**HostヘッダーではなくPUBLIC_ORIGINを
+    使う**。CloudFrontがAllViewerExceptHostHeaderポリシーでHostを転送しないため、
+    Hostから組み立てると生のLambda Function URLを指してしまうため
+    (handler.pyのPUBLIC_ORIGIN定義箇所のコメント参照)。"""
 
     def test_description_and_og_tags_present(self, ph):
         body = ph.handler(_event(), None)["body"]
@@ -442,31 +444,42 @@ class TestPreviewShareMetaTags:
         assert '<meta property="og:description" content="' in body
         assert '<meta name="twitter:title" content="' in body
 
-    def test_no_og_image_tag_when_host_header_missing(self, ph):
+    def test_og_image_uses_public_origin_not_host_header(self, ph):
+        """CloudFront経由ではHostが生のLambda URLになるため、それを使ってはいけない"""
+        body = ph.handler(
+            _event({"host": "abc123.lambda-url.us-east-1.on.aws"}), None
+        )["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
+        assert '<meta name="twitter:card" content="summary_large_image">' in body
+        assert "lambda-url" not in body
+
+    def test_og_image_emitted_even_without_host_header(self, ph):
+        body = ph.handler(_event(), None)["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
+
+    def test_no_og_image_tag_when_banner_missing(self, ph):
+        ph._OG_IMAGE_BYTES = b""
         body = ph.handler(_event(), None)["body"]
         assert "og:image" not in body
         assert '<meta name="twitter:card" content="summary">' in body
 
-    def test_og_image_tag_auto_resolved_from_host_header(self, ph):
-        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
-        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
-        assert '<meta name="twitter:card" content="summary_large_image">' in body
-
-    def test_og_image_url_override_takes_precedence_over_host(self, ph):
+    def test_og_image_url_override_takes_precedence(self, ph):
         ph.OG_IMAGE_URL_OVERRIDE = "https://cdn.example.com/banner.png"
-        body = ph.handler(_event({"host": "pegsignal.com"}), None)["body"]
+        body = ph.handler(_event(), None)["body"]
         assert '<meta property="og:image" content="https://cdn.example.com/banner.png">' in body
 
-    def test_canonical_and_og_url_use_host_header_without_query_string(self, ph):
-        body = ph.handler(_event({"host": "pegsignal.com"}, src="note"), None)["body"]
+    def test_canonical_and_og_url_use_public_origin_without_query_string(self, ph):
+        body = ph.handler(
+            _event({"host": "abc123.lambda-url.us-east-1.on.aws"}, src="note"), None
+        )["body"]
         assert '<meta property="og:url" content="https://pegsignal.com/">' in body
         assert '<link rel="canonical" href="https://pegsignal.com/">' in body
         assert "src=note" not in body
 
-    def test_no_canonical_tag_when_host_header_missing(self, ph):
+    def test_site_url_env_var_overrides_public_origin(self, ph):
+        ph.PUBLIC_ORIGIN = "https://staging.example.com"
         body = ph.handler(_event(), None)["body"]
-        assert "og:url" not in body
-        assert "rel=\"canonical\"" not in body
+        assert '<meta property="og:url" content="https://staging.example.com/">' in body
 
     def test_description_switches_with_lang(self, ph):
         body_en = ph.handler(_event(lang="en"), None)["body"]

@@ -380,14 +380,28 @@ _OG_DESCRIPTION = {
         "PEG ratio, ranked across short/mid/long-term horizons — no signup needed to read it."
     ),
 }
+# og:url・canonical・og:imageに使う公開オリジン。
+#
+# **リクエストのHostヘッダーから組み立ててはいけない**(2026-08-08、noteの埋め込みで
+# シェアカードに画像が出ない不具合の原因調査で判明し修正)。このサービスの
+# CloudFrontディストリビューションは全てAWS管理のオリジンリクエストポリシー
+# "AllViewerExceptHostHeader"(ID b689b0a8-...)を使っており、名前の通り
+# **Hostヘッダーだけはオリジンへ転送しない**(Lambda Function URLをオリジンに
+# する場合、Hostはオリジン自身のドメインでなければならないため、この設定自体は
+# 正しい。deploy_domain.sh等を参照)。そのためCloudFront経由でこのLambdaが
+# 受け取るHostは常に生のFunction URLのホスト名
+# (xxxxx.lambda-url.us-east-1.on.aws)であり、pegsignal.com ではない。
+# Hostから組み立てると、シェアカードもcanonicalも生Lambda URLを指してしまう
+# (canonicalが生URLを指すのはSEO上さらに有害)。
+#
+# したがって公開URLは明示的に持つ。SITE_URL環境変数で上書きできるようにして
+# あるが、既定値のままでも本番(pegsignal.com)は正しく動く。
+PUBLIC_ORIGIN = os.environ.get("SITE_URL", "https://pegsignal.com").rstrip("/")
+
 # シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。deploy.yml・
 # deploy_preview.sh・deploy_dev.shがhandler.pyと同じディレクトリからzipへ
 # 同梱するため、__file__基準でこのファイル自身の隣を見れば本番・開発どちらの
-# デプロイでも同じパスで見つかる。og:imageの絶対URLは環境変数OG_IMAGE_URLで
-# 明示的に上書きしない限り、リクエストのHostヘッダーから
-# "https://<host>/og-image.jpg" を都度組み立てる(ドメイン統合後の
-# pegsignal.com/en.pegsignal.com/pegsignal-dev.com等、どのホストでも
-# 追加設定なしに動くようにするため)
+# デプロイでも同じパスで見つかる。画像はこのLambda自身が_OG_IMAGE_ROUTEで配信する
 _OG_IMAGE_PATH = os.path.join(os.path.dirname(__file__), "og-image.jpg")
 _OG_IMAGE_ROUTE = "/og-image.jpg"
 OG_IMAGE_URL_OVERRIDE = os.environ.get("OG_IMAGE_URL", "")
@@ -414,11 +428,11 @@ def _og_image_response() -> dict:
     }
 
 
-def _resolve_og_image_url(host: str) -> str:
+def _resolve_og_image_url() -> str:
     if OG_IMAGE_URL_OVERRIDE:
         return OG_IMAGE_URL_OVERRIDE
-    if host and _OG_IMAGE_BYTES:
-        return f"https://{host}{_OG_IMAGE_ROUTE}"
+    if _OG_IMAGE_BYTES:
+        return f"{PUBLIC_ORIGIN}{_OG_IMAGE_ROUTE}"
     return ""
 
 
@@ -500,8 +514,8 @@ def handler(event, context):
     inner = (_intro_html(lang, universe, REGISTER_URL) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
              + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL))
     # og:url/canonicalはsrc等のトラッキングクエリを含めない(シェア・インデックス
-    # されるURLをクリーンに保つため)
-    host = (headers.get("host") or headers.get("Host") or "").strip()
-    canonical_url = f"https://{host}{path}" if host else ""
-    og_image_url = _resolve_og_image_url(host)
+    # されるURLをクリーンに保つため)。ホスト名はHostヘッダーではなく
+    # PUBLIC_ORIGINを使う(理由はPUBLIC_ORIGINの定義箇所のコメントを参照)
+    canonical_url = f"{PUBLIC_ORIGIN}{path}"
+    og_image_url = _resolve_og_image_url()
     return _page(inner, lang, universe, canonical_url=canonical_url, og_image_url=og_image_url)
