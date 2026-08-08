@@ -19,23 +19,26 @@ PegSignalを実際に人の目に触れさせるための投稿文面の下書�
 
 ## 1. note.com向け紹介記事案（日本語・長文）
 
-**タイトル案**: 個人開発で「PEGレシオが低い成長株」を毎週メールしてくれる
-無料サービスを作った話
+**タイトル案**: 銘柄も選ばず、ログインもせず、ただ「PEGが低い成長株」を
+眺めるだけのサービスを作った話
 
 **本文案**:
 
 投資クラスタ・個人開発クラスタ向けに、週末で作った無料サービスを紹介します。
 
-**PegSignal**は、NASDAQ100（またはS&P500）の構成銘柄から、PEGレシオ
-（株価収益率 ÷ 利益成長率）が低い銘柄を自動でスクリーニングし、
-短期・中期・長期の3つの判定期間でランキングする無料サービスです。
+**PegSignal**は、自分で銘柄を選んだりウォッチリストを作ったりする必要が
+一切ない、**受動的に眺めるだけ**のPEGランキングサービスです。NASDAQ100
+（またはS&P500）の構成銘柄から、PEGレシオ（株価収益率 ÷ 利益成長率）が
+低い銘柄を自動でスクリーニングし、短期・中期・長期の3つの期間でランキング
+した結果をそのまま公開しています。
 
-**登録不要で、今の選定結果をそのまま見られます:**
+**アカウント登録も不要、開けばすぐ見られます:**
 https://pegsignal.com/
 
-メールアドレスを登録すると、さらに「自分で選んだ銘柄の監視」ができます。
-トレンド（ゴールデンクロス/デッドクロス）・モメンタム（RSI）・出来高の変化を
-見張って、変化があればメールでお知らせします。
+「自分で銘柄を探すのは面倒だけど、今どんな銘柄が良さそうか知りたい」
+くらいの温度感で眺めてもらうためのサービスです。メールアドレスを登録すると、
+気になる銘柄だけを監視してトレンド・モメンタム・出来高の変化をメールで
+知らせる機能も使えますが、それすら任意です。
 
 **大事な注意点**: これは投資助言ではありません。公開データに機械的な計算式を
 適用した結果を淡々と共有するだけのツールです。売買の判断はご自身の責任で
@@ -49,11 +52,11 @@ https://pegsignal.com/
 
 ## 2. X（Twitter）向け短文案（日本語）
 
-**案A（機能訴求）**:
+**案A（受動視聴訴求）**:
 ```
-PEGレシオが低い成長株を自動スクリーニングする無料サービスを個人開発しました。
-NASDAQ100 / S&P500対応、短期・中期・長期の3期間でランキング。
-登録不要でそのまま見られます（メール登録すると銘柄の監視もできます）。
+銘柄選びもウォッチリスト作りも不要、ただ「PEGが低い成長株」を眺めるだけの
+無料サービスを個人開発しました。NASDAQ100 / S&P500対応、短期・中期・長期の
+3期間でランキング。登録不要、開けばすぐ見られます。
 投資助言ではなく機械的な計算結果の共有ツールです。
 https://pegsignal.com/
 #個人開発 #投資 #米国株
@@ -61,8 +64,9 @@ https://pegsignal.com/
 
 **案B（開発者視点）**:
 ```
-週末に作った「PEGレシオが低い成長株をランキングするだけ」の無料サービス、
-地味に便利なので個人開発クラスタの人にも見てほしい。登録不要で見れます。
+週末に作った「PEGが低い成長株をランキングするだけ」の無料サービス、
+地味に便利なので個人開発クラスタの人にも見てほしい。自分で銘柄を探す
+手間なく、受け身でぼーっと眺められる。登録不要。
 AWS Lambda + DynamoDBのサーバーレス構成。
 https://pegsignal.com/
 #個人開発
@@ -72,23 +76,27 @@ https://pegsignal.com/
 
 ## 3. Hacker News "Show HN" 向け英文案
 
-**タイトル案**: Show HN: PegSignal – free PEG-ratio screening of
-NASDAQ100 / S&P 500, no signup needed to read it
+**タイトル案**: Show HN: PegSignal – a PEG-ratio stock ranking you just
+look at, no account, no watchlist to set up
 
 **本文案**:
 ```
-I built a small, free service that screens NASDAQ100 (or S&P 500)
-constituents for growth stocks with a low PEG ratio (P/E ÷ earnings
-growth rate) and ranks them across three time horizons (short, mid,
-long term).
+I built a small, free service for people who want to glance at "which
+growth stocks look cheap by PEG right now" without picking tickers or
+building a watchlist themselves. It's meant to be passive: you open
+the page, it's already ranked, you read it and leave.
 
-You can read the current results without signing up:
+It screens NASDAQ100 (or S&P 500) constituents for growth stocks with
+a low PEG ratio (P/E ÷ earnings growth rate) and ranks them across
+three time horizons (short, mid, long term) — no signup needed to
+read it:
 https://pegsignal.com/?lang=en
 
-If you give it an email address, you additionally get to pick
-individual stocks to track — it then watches trend (moving-average
-crossovers), momentum (RSI), and volume on those, and emails you when
-something changes, on whatever schedule you pick.
+If you do give it an email, you can additionally pick individual
+stocks to track — it then watches trend (moving-average crossovers),
+momentum (RSI), and volume on those and emails you when something
+changes — but that's opt-in on top of the passive default, not a
+requirement.
 
 It's not investment advice — it mechanically applies fixed formulas to
 public data (via yfinance) and shows the result as-is. No login, no
