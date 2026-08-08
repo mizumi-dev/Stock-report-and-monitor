@@ -1,4 +1,4 @@
-# 集客用の下書き文面（2026-08-07、URL更新: apex統合後）
+# 集客用の下書き文面（2026-08-08、チャネル決定・?src=計測を追加）
 
 PegSignalを実際に人の目に触れさせるための投稿文面の下書き。**実際の投稿は
 ユーザー自身の判断・アカウントで行うこと**（Claudeは代行しない）。
@@ -14,6 +14,24 @@ PegSignalを実際に人の目に触れさせるための投稿文面の下書�
 を使い分けていたが、その区別は無くなっている(`preview.pegsignal.com`は
 内容が重複したため無効化済み)。英語版は `?lang=en` を付ける
 (`https://pegsignal.com/?lang=en`)。
+
+**チャネルごとのアカウント方針(2026-08-08決定)**:
+- **note**: 既存アカウント「お金はおっかねえ」(個人の株式投資ブログとして
+  過去に十数本投稿実績あり)を使う
+- **X**: 「お金はおっかねえ」と同じ名義で、**個人の開発アカウントとして新規作成**。
+  PegSignal専用アカウントにはしない(noteとの一貫性を優先し、今後別の
+  プロダクトを出すときも同じアカウントで発信できるようにするため)。現状の
+  プライベートアカウントは非公開のため集客には使わない
+- **Hacker News**: 新規作成済みのアカウント「Cashphobia」を使う
+
+**流入元計測(`?src=`)について(2026-08-08追加)**: landing-preview
+(`mnt/user-data/outputs/aws_deploy/lambda_preview/handler.py`)に
+register-stock側と同じ`?src=`規約でのアクセスログを追加した(develop環境への
+反映待ち、本番反映はユーザー承認後)。下記の各リンクには
+`?src=note`・`?src=x`・`?src=hn`を付けている。CloudWatch Logsで
+`[ACCESS] preview ... src='note'`のように検索すればチャネル別の実アクセス数が
+追える。リンク自体の見た目は`pegsignal.com/?src=note`のようになり不自然では
+ないので、そのまま投稿に使ってよい。
 
 ---
 
@@ -33,7 +51,7 @@ PegSignalを実際に人の目に触れさせるための投稿文面の下書�
 した結果をそのまま公開しています。
 
 **アカウント登録も不要、開けばすぐ見られます:**
-https://pegsignal.com/
+https://pegsignal.com/?src=note
 
 「自分で銘柄を探すのは面倒だけど、今どんな銘柄が良さそうか知りたい」
 くらいの温度感で眺めてもらうためのサービスです。メールアドレスを登録すると、
@@ -58,7 +76,7 @@ https://pegsignal.com/
 無料サービスを個人開発しました。NASDAQ100 / S&P500対応、短期・中期・長期の
 3期間でランキング。登録不要、開けばすぐ見られます。
 投資助言ではなく機械的な計算結果の共有ツールです。
-https://pegsignal.com/
+https://pegsignal.com/?src=x
 #個人開発 #投資 #米国株
 ```
 
@@ -68,7 +86,7 @@ https://pegsignal.com/
 地味に便利なので個人開発クラスタの人にも見てほしい。自分で銘柄を探す
 手間なく、受け身でぼーっと眺められる。登録不要。
 AWS Lambda + DynamoDBのサーバーレス構成。
-https://pegsignal.com/
+https://pegsignal.com/?src=x
 #個人開発
 ```
 
@@ -90,7 +108,7 @@ It screens NASDAQ100 (or S&P 500) constituents for growth stocks with
 a low PEG ratio (P/E ÷ earnings growth rate) and ranks them across
 three time horizons (short, mid, long term) — no signup needed to
 read it:
-https://pegsignal.com/?lang=en
+https://pegsignal.com/?lang=en&src=hn
 
 If you do give it an email, you can additionally pick individual
 stocks to track — it then watches trend (moving-average crossovers),
@@ -116,6 +134,18 @@ project so any feedback is very welcome.
 5. 「submit」で投稿完了
 
 ---
+
+## 投稿前の準備状況(2026-08-08時点)
+
+- **対応済み**: landing-previewにOGP/Twitter Cardのメタタグ(og:title・
+  og:description・twitter:card)を追加。今まで完全に空だったため、X等に
+  リンクを貼ると説明文の無いカードになっていた
+- **未着手(画像アセット待ち)**: シェア用バナー画像(横長)・ロゴ(正方形、PEGの
+  モノグラム)をGeminiで生成中。ファイルが用意でき次第、Lambdaに組み込んで
+  `OG_IMAGE_URL`環境変数を設定する(画像無しでもテキストのみのカードとしては
+  投稿可能なので、画像取り込みは投稿のブロッカーではない)
+- develop環境での動作確認・ユーザー承認後のmaster反映が必要(このリポジトリの
+  開発フロー、CLAUDE.md参照)
 
 ## 補足: 投稿タイミング・注意事項
 
