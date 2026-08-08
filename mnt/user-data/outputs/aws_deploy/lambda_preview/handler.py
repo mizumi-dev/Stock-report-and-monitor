@@ -64,12 +64,23 @@ _ANCHOR = {"SHORT": "short", "MID": "mid", "LONG": "long"}
 
 
 def _detect_lang(event) -> str:
-    headers = event.get("headers") or {}
-    value = (headers.get("x-site-lang") or "").strip().lower()
-    if value in SUPPORTED_LANGS:
-        return value
+    """?lang=クエリをX-Site-Langヘッダーより優先する(2026-08-08、?lang=enが
+    無視される不具合の修正)。
+
+    register-stock(app.pegsignal.com/en.pegsignal.com)はドメインごとに
+    X-Site-Langヘッダーが変わる構成なのでヘッダー優先で問題ないが、
+    landing-previewはpegsignal.com一本(en側のサブドメインを持たない)で、
+    英語表示は`?lang=en`クエリのみで切り替える設計(docs/growth-drafts.md参照)。
+    ところがpegsignal.comのCloudFrontはen.pegsignal.comとの対称性のため
+    X-Site-Lang: jaを全リクエストに固定で付与している
+    (deploy_patch_ja_lang_header.sh)。ヘッダーを先に見る実装だと、この
+    固定ヘッダーが常に勝ってしまい?lang=enが黙って無視される。"""
     params = event.get("queryStringParameters") or {}
     value = (params.get("lang") or "").strip().lower()
+    if value in SUPPORTED_LANGS:
+        return value
+    headers = event.get("headers") or {}
+    value = (headers.get("x-site-lang") or "").strip().lower()
     return value if value in SUPPORTED_LANGS else LANG_JA
 
 
