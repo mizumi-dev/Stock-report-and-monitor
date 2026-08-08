@@ -232,6 +232,18 @@ class TestPreviewLanguage:
         visible = re.sub(r"<style>.*?</style>", "", body, flags=re.S)
         assert not re.search(r"[ぁ-んァ-ン一-龥]", visible)
 
+    def test_lang_query_wins_over_fixed_x_site_lang_ja_header(self, ph):
+        """pegsignal.comのCloudFrontはen.pegsignal.comとの対称性のため
+        X-Site-Lang: jaを全リクエストに固定で付与している
+        (deploy_patch_ja_lang_header.sh)。landing-previewはpegsignal.com
+        一本(en側のサブドメインを持たない)で、英語表示は?lang=enクエリのみで
+        切り替える設計のため、このヘッダーに負けて?lang=enが無視されると
+        英語版が永久に表示できなくなる(2026-08-08に発覚した実際の不具合)。"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event({"x-site-lang": "ja"}, lang="en"), None)
+        assert '<html lang="en"' in r["body"]
+
 
 class TestPreviewUniverse:
     """対象指数(NASDAQ100/S&P500)の切り替え(2026-08-07追加)。langと同様、
