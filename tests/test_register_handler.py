@@ -333,6 +333,39 @@ class TestLanguage:
         assert item is not None
         assert item["lang"] == "en"
 
+    def test_english_when_lang_param_present_without_any_header(self, rh):
+        """app.pegsignal.comにはX-Site-Langヘッダーが無いため、pegsignal.comの
+        埋め込み申込みフォーム(隠しフィールドlang=en)から送信された場合、
+        ?lang=enだけを頼りに英語表示にできる必要がある(2026-08-09、この経路の
+        申込みが日本語で処理される不具合の修正)。"""
+        r = rh.handler(_event(lang="en"), None)
+        assert "Sign up" in r["body"]
+        assert "お申込み" not in r["body"]
+
+    def test_lang_param_overrides_x_site_lang_header(self, rh):
+        r = rh.handler(_event(_headers={"x-site-lang": "ja"}, lang="en"), None)
+        assert "Sign up" in r["body"]
+
+    def test_lang_param_overrides_geolocation(self, rh):
+        r = rh.handler(_event(_headers={"cloudfront-viewer-country": "US"}, lang="ja"), None)
+        assert "お申込み" in r["body"]
+
+    def test_signup_stores_lang_from_query_param_without_header(self, rh):
+        """pegsignal.comの埋め込みフォーム経由の申込み(app.pegsignal.comには
+        X-Site-Langが無く、隠しフィールドlang=enのみで英語を伝える)を再現する。
+        修正前はここでlang='ja'が保存され、以後のレポートメールも日本語になる
+        実害があった。"""
+        rh.handler(_event(
+            signup_email="viahn@example.com", lang="en",
+            captcha_n1="2", captcha_n2="3", captcha_answer="5",
+        ), None)
+        item = None
+        for v in rh.dynamodb.Table("approved_tokens")._items.values():
+            if v.get("email") == "viahn@example.com":
+                item = v
+        assert item is not None
+        assert item["lang"] == "en"
+
     def test_main_form_renders_in_stored_language_regardless_of_current_header(self, rh):
         rh.dynamodb.Table("approved_tokens").put_item(
             Item={"token": VALID_TOKEN, "email": "user@example.com",
