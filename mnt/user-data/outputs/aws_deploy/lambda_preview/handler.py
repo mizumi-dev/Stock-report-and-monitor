@@ -441,6 +441,12 @@ _OG_DESCRIPTION = {
 # あるが、既定値のままでも本番(pegsignal.com)は正しく動く。
 PUBLIC_ORIGIN = os.environ.get("SITE_URL", "https://pegsignal.com").rstrip("/")
 
+# Google Search Consoleの所有権確認用(HTMLタグ方式、2026-08-09追加)。
+# https://pegsignal.com 側でSearch Consoleに登録した際に発行された値を
+# 環境変数GOOGLE_SITE_VERIFICATIONで渡す。未設定なら何も出力しない
+# (開発環境等、意図せず確認用タグが出ないようにするため)
+GOOGLE_SITE_VERIFICATION = os.environ.get("GOOGLE_SITE_VERIFICATION", "")
+
 # シェア用バナー画像(1200x630、Geminiで生成・2026-08-08追加)。日本語版・英語版で
 # バナー内の文言が異なる(和文合成/欧文合成)ため、言語ごとに別ファイル・別ルートを
 # 持つ(2026-08-08、英語ページに日本語バナーが出ていた不具合を修正)。deploy.yml・
@@ -582,7 +588,10 @@ def _page(inner_html: str, lang: str, universe: str, status: int = 200,
              if lang == LANG_EN else f"PegSignal — {preset['label']} PEGスクリーニング結果")
     description = _OG_DESCRIPTION[lang]
     footer = ('<a href="?">Home</a>' if lang == LANG_EN else '<a href="?">トップ</a>')
-    og_tags = [
+    og_tags = []
+    if GOOGLE_SITE_VERIFICATION:
+        og_tags.append(f'<meta name="google-site-verification" content="{html.escape(GOOGLE_SITE_VERIFICATION)}">')
+    og_tags += [
         f'<meta name="description" content="{html.escape(description)}">',
         '<meta property="og:type" content="website">',
         f'<meta property="og:title" content="{html.escape(title)}">',

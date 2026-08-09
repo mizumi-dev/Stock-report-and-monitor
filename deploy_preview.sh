@@ -23,6 +23,13 @@ REGISTER_URL=$(aws lambda get-function-url-config --function-name register-stock
   --region $AWS_REGION --query FunctionUrl --output text)
 echo "register-stock URL(リンク先として埋め込む): $REGISTER_URL"
 
+# Google Search Console所有権確認用(2026-08-09追加)。update-function-configurationは
+# Variablesを丸ごと置き換えるため、既存の設定値を読み直して引き継ぐ(未設定なら空文字
+# のままで、handler.py側もタグを出力しない)
+GOOGLE_SITE_VERIFICATION=$(aws lambda get-function-configuration --function-name landing-preview \
+  --region $AWS_REGION --query "Environment.Variables.GOOGLE_SITE_VERIFICATION" --output text 2>/dev/null || echo "")
+[ "$GOOGLE_SITE_VERIFICATION" = "None" ] && GOOGLE_SITE_VERIFICATION=""
+
 echo "=== 1. IAMロール作成(読み取り専用: app_settingsのGetItemのみ) ==="
 cat > /tmp/preview-lambda-trust-policy.json << 'EOF'
 {
@@ -61,14 +68,14 @@ aws lambda create-function \
   --handler handler.handler \
   --zip-file fileb://preview.zip \
   --timeout 10 --memory-size 128 \
-  --environment "Variables={REGISTER_URL=$REGISTER_URL}" \
+  --environment "Variables={REGISTER_URL=$REGISTER_URL,GOOGLE_SITE_VERIFICATION=$GOOGLE_SITE_VERIFICATION}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name landing-preview \
     --zip-file fileb://preview.zip --region $AWS_REGION
 
 aws lambda update-function-configuration \
   --function-name landing-preview \
-  --environment "Variables={REGISTER_URL=$REGISTER_URL}" \
+  --environment "Variables={REGISTER_URL=$REGISTER_URL,GOOGLE_SITE_VERIFICATION=$GOOGLE_SITE_VERIFICATION}" \
   --region $AWS_REGION
 
 # 濫用でアカウントの同時実行枠を食い潰さないよう上限を設けたいが、既存のLambda群
