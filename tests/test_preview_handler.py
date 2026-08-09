@@ -244,6 +244,50 @@ class TestPreviewLanguage:
         r = ph.handler(_event({"x-site-lang": "ja"}, lang="en"), None)
         assert '<html lang="en"' in r["body"]
 
+    def test_english_for_visitor_geolocated_outside_japan(self, ph):
+        """CloudFront-Viewer-Countryが日本以外なら、明示指定が無くても英語を既定にする
+        (2026-08-07、海外流入向けに追加)。"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(_headers={"cloudfront-viewer-country": "US"}), None)
+        assert '<html lang="en"' in r["body"]
+
+    def test_japanese_for_visitor_geolocated_in_japan(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(_headers={"cloudfront-viewer-country": "JP"}), None)
+        assert '<html lang="ja"' in r["body"]
+
+    def test_japanese_when_no_geolocation_header_present(self, ph):
+        """ヘッダー自体が無い場合(Function URL直叩き・開発環境等)は
+        従来通り日本語を既定とする(地理判定によって既定挙動を壊さない)。"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(), None)
+        assert '<html lang="ja"' in r["body"]
+
+    def test_explicit_lang_param_overrides_geolocation(self, ph):
+        """?lang=はCloudFront-Viewer-Countryより優先される(明示指定が最優先)。"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(lang="ja", _headers={"cloudfront-viewer-country": "US"}), None)
+        assert '<html lang="ja"' in r["body"]
+
+    def test_geolocation_overrides_fixed_x_site_lang_ja_header(self, ph):
+        """pegsignal.comはX-Site-Lang: jaを常時固定で付与するため(上記の?lang=不具合と
+        同じ原因)、ヘッダーを地理判定より先に見ると地理判定が永久に効かなくなる。
+        地理判定をX-Site-Langヘッダーより優先することで、海外からのアクセスでも
+        英語を既定にできる。"""
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(_headers={"x-site-lang": "ja", "cloudfront-viewer-country": "US"}), None)
+        assert '<html lang="en"' in r["body"]
+
+    def test_geolocation_country_code_is_case_insensitive(self, ph):
+        for m in ("SHORT", "MID", "LONG"):
+            _put_snapshot(ph, m)
+        r = ph.handler(_event(_headers={"cloudfront-viewer-country": "jp"}), None)
+        assert '<html lang="ja"' in r["body"]
 
 class TestPreviewUniverse:
     """対象指数(NASDAQ100/S&P500)の切り替え(2026-08-07追加)。langと同様、
