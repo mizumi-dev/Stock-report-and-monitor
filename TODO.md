@@ -297,9 +297,16 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
 - CLAUDE.mdに「ユーザーが明示的に依頼すればClaudeもmasterへマージしてよい」を
   追記済み(既定はユーザー自身のマージのまま)
 
+**完了しているもの(続き、2026-08-09追加)**:
+- Google Search Console所有権確認(HTMLタグ方式)対応。`GOOGLE_SITE_VERIFICATION`
+  環境変数(未設定なら`<head>`に何も出さない)をhandler.pyに追加、本番Lambdaに
+  値を設定、develop→master経由で本番反映・タグ出力を直接確認済み(PR #60/#61)。
+  ユーザーがSearch Console側で所有権確認・`sitemap.xml`送信・インデックス登録
+  リクエストの3点を完了
+
 **未着手・次にやること**:
-- **Google Search Consoleへの`sitemap.xml`登録**(Claude側では実行不可、
-  ユーザー操作が必要)。登録後、インデックス状況・検索流入の確認が可能になる
+- Search Console側でのインデックス状況・検索流入の確認(登録直後のため、
+  反映まで数日〜数週間かかる見込み)
 - **Hacker News投稿**: `docs/growth-drafts.md`に英文・投稿手順を用意済みだが、
   ユーザーの心理的ハードルが高く保留中。急ぎではない
 - **Instagram**: コンテンツ形態(テキスト・データ主体)とキャプションに
