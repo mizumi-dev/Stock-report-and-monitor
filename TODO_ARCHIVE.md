@@ -657,3 +657,31 @@ GitHub ActionsからOIDC連携でLambda 2本のコードを自動デプロイす
   S&P500を選んでいる承認済みユーザーが実質いないため未生成。切り替えUI自体は
   正常動作しているが、ランキングは「データがまだありません」と表示される。
   日次バッチが対象ユーザー分を実行すれば自然に埋まる想定
+
+## 訪問者の地理的位置による言語判定(2026-08-09、対応済み)
+
+海外流入(Hacker News投稿等)向けに、`?lang=`等の明示指定が無い場合、
+`CloudFront-Viewer-Country`ヘッダーで日本以外からのアクセスを英語表示にする
+機能。コードはPR #57で本番反映(`?lang=`>地理判定>`X-Site-Lang`>既定jaの
+優先順位)。
+
+- 最初の実装でCloudFrontのOrigin Request Policyを`AllViewerExceptHostHeader`
+  から`allViewerAndWhitelistCloudFront`方式の自作ポリシーに切り替えたところ、
+  **Hostヘッダーもオリジンへ転送してしまい両ドメイン(pegsignal.com/
+  app.pegsignal.com)とも閲覧不能になる障害を発生させた**(Lambda Function URL
+  はHost不一致のリクエストを拒否するため)。直後に元のポリシーへ復旧、
+  ユーザーの実機ブラウザ確認で復旧を確認
+- `whitelist`方式(`User-Agent`・`Referer`・`CloudFront-Viewer-Country`のみを
+  明示的に列挙、Hostは含めない)でポリシーを再設計。1ドメインずつ適用し、
+  都度ユーザーに実機ブラウザで確認してもらいながら両ドメインに適用
+  (ポリシーID`643c97ed-3ba1-4ce5-b107-ba7921f18f07`)
+- ユーザーがVPNで日本以外からのアクセスを再現し、実際に英語表示になることを
+  確認。地理判定が本番で正しく機能していることを確認済み
+- 副産物として発見: 申込みページ(`app.pegsignal.com`)内の「登録せずに見る」
+  リンクが無効化済みの`preview.pegsignal.com`を指していた不具合を修正。
+  `register-stock`の`PREVIEW_URL`環境変数を`https://pegsignal.com/`に更新
+  (本番のみ、devは別途正常な値のため変更不要)
+- **教訓**: CloudFrontの`Status: Deployed`は設定伝播の確認にしかならず、
+  オリジンが実際に応答するかは保証しない。この開発環境からは外部HTTP疎通が
+  ブロックされているため、CloudFront設定変更は「変更→ユーザーに即座に
+  実機確認してもらう」を1ドメインずつ徹底することとした

@@ -5,35 +5,6 @@
 完了したタスクは`TODO_ARCHIVE.md`に移動済み。ここには未着手・要検討の項目が
 残っているセクションのみを置く。
 
-## 訪問者の地理的位置による言語判定(2026-08-09)
-
-海外流入(Hacker News投稿等)向けに、`?lang=`等の明示指定が無い場合、
-`CloudFront-Viewer-Country`ヘッダーで日本以外からのアクセスを英語表示にする
-機能。コードはPR #57で本番反映済み(`?lang=`>地理判定>`X-Site-Lang`>既定ja
-の優先順位)。
-
-- **対応済み**: 最初の実装でCloudFrontのOrigin Request Policyを
-  `AllViewerExceptHostHeader`から`allViewerAndWhitelistCloudFront`方式の
-  自作ポリシーに切り替えたところ、**Hostヘッダーもオリジンへ転送してしまい
-  両ドメイン(pegsignal.com/app.pegsignal.com)とも閲覧不能になる障害を発生
-  させた**(Lambda Function URLはHost不一致のリクエストを拒否するため)。
-  直後に元のポリシーへ復旧、ユーザーの実機ブラウザ確認で復旧を確認済み
-- **対応済み**: `whitelist`方式(`User-Agent`・`Referer`・
-  `CloudFront-Viewer-Country`のみを明示的に列挙、Hostは含めない)で
-  ポリシーを再設計。1ドメインずつ適用し、都度ユーザーに実機ブラウザで
-  確認してもらいながら両ドメインに適用済み(ポリシーID
-  `643c97ed-3ba1-4ce5-b107-ba7921f18f07`)。両ドメインとも正常表示を確認済み
-- **未確認(次のアクション)**: 地理判定そのものが実際に効くかどうか。
-  日本国内からの通常アクセスでは違いが見えないため、VPN等で日本以外からの
-  アクセスを再現しての確認が必要(ユーザーに依頼済み、結果待ち)
-- **対応済み**: 申込みページ(`app.pegsignal.com`)内の「登録せずに見る」リンクが
-  無効化済みの`preview.pegsignal.com`を指していた不具合を発見・修正。
-  `REGISTER_STOCK`の`PREVIEW_URL`環境変数を`https://pegsignal.com/`に更新
-  (本番のみ、devは別途正常な値のため変更不要)
-- **教訓**: CloudFrontの`Status: Deployed`は設定伝播の確認にしかならず、
-  オリジンが実際に応答するかは保証しない。この開発環境からは外部HTTP疎通が
-  ブロックされているため、CloudFront設定変更は「変更→ユーザーに即座に
-  実機確認してもらう」を1ドメインずつ徹底することとした
 
 ## 【最優先】マネタイズ最速化ロードマップ（2026-08-07、ユーザー指示で優先度再編）
 
