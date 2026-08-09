@@ -252,9 +252,36 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
      通常のランキングページのHTMLがそのまま返っていた。両方に専用ルートを
      追加(`sitemap.xml`はlang×universeの4パターンを列挙)
   テスト追加、全314件パス確認済み
-- **未着手（次のアクション）**: 上記SEO修正のdevelop→master反映と本番確認。
-  反映後、Google Search Consoleにsitemap.xmlを登録すると効果測定・
-  インデックス状況の確認がしやすくなる(未着手)
+- **不具合と修正(2026-08-09、本番反映前レビューで発覚)**: 上記canonical修正を
+  本番反映する前に「悪影響が出る箇所は無いか」とユーザーに確認を求められ調査。
+  developには別セッションが追加した**地理判定(`CloudFront-Viewer-Country`)による
+  `?lang=`自動切り替え**(2026-08-09、`TODO_ARCHIVE.md`参照)が既に入っており、
+  これと組み合わせると新たな不具合が起きることが判明:
+  - `_detect_lang()`の優先順位は`?lang=`>地理判定>`X-Site-Lang`>既定ja。
+    Googlebot等のクローラーは大半が**米国IPからアクセスする**ため、
+    地理判定込みの`lang`をcanonical/og:imageにそのまま使うと、noteやXで
+    日本語向けに共有した素のURL(`pegsignal.com/`)が「このページの正規版は
+    英語です」と自己申告してしまう。Googleは日本語トップページを英語版の
+    重複とみなし独立にインデックスしなくなり、`sitemap.xml`が日本語URLとして
+    列挙している内容とcanonicalの自己申告が矛盾する状態になる(Googleは
+    canonicalを優先するため、sitemapの日本語エントリは無視される)。
+    SNSクローラー(X/note等の画像取得)も同様に米国発のことが多く、日本語で
+    共有したURLに英語版のog:imageバナーが出てしまう副作用もある
+  - 実際に`cloudfront-viewer-country`ヘッダーを変えてhandler.pyを直接叩き、
+    日本(JP)・米国(US)・`?src=note`付きURLでの挙動を再現して問題を確認した
+    うえで修正(推測ではなく実際に動かして確認)
+  - **修正**: canonical/og:image専用の言語判定関数`_explicit_lang()`を新設。
+    地理判定・`X-Site-Lang`は一切見ず、URLに明示された`?lang=`のみを見る
+    (無指定なら既定ja)。ページの表示言語自体(`_detect_lang()`の結果)は
+    地理判定を維持したまま変更していない(地理判定によるURL1本での言語
+    振り分け機能は完全に維持される、とユーザーに確認済み)
+  - テスト追加(地理判定で表示言語が変わってもcanonical/og:imageは日本語の
+    ままであること、表示言語の地理判定自体は退行していないこと)、
+    全333件パス確認済み
+- **未着手（次のアクション）**: 上記SEO修正一式(canonical/og:imageの
+  lang・universe対応、robots.txt/sitemap.xml、地理判定との相互作用の修正)の
+  develop→master反映と本番確認。反映後、Google Search Consoleにsitemap.xmlを
+  登録すると効果測定・インデックス状況の確認がしやすくなる(未着手)
 
 ## 開発環境と本番環境の分離（2026-08-07）
 

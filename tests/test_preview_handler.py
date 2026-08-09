@@ -568,6 +568,42 @@ class TestPreviewShareMetaTags:
         assert "free service that screens NASDAQ100" in body_en
 
 
+class TestPreviewCanonicalIgnoresGeolocation:
+    """canonical・og:imageは地理判定(CloudFront-Viewer-Country)を無視し、
+    URLに明示された?lang=だけで決める(2026-08-09、本番反映前レビューで発覚した
+    不具合の修正)。
+
+    地理判定はGooglebot等のクローラーにも等しく適用され、大半が米国IPから
+    アクセスする。canonical/og:imageに地理判定込みのlangを使うと、noteやXで
+    日本語向けに共有した素のURL(pegsignal.com/)が「このページの正規版は
+    英語です」と自己申告してしまい、Googleが日本語トップページを独立に
+    インデックスしなくなる・SNSクローラーが英語バナーを取得してしまう、
+    という実害が出る。
+
+    ページの表示言語自体(<html lang=・本文の翻訳)は地理判定を維持したまま、
+    canonical/og:imageの申告だけを決定的にする。"""
+
+    def test_content_still_switches_to_english_by_geolocation(self, ph):
+        """表示言語の地理判定機能自体は維持されていること(退行防止)"""
+        r = ph.handler(_event({"cloudfront-viewer-country": "US"}), None)
+        assert '<html lang="en"' in r["body"]
+
+    def test_canonical_stays_japanese_for_geolocated_english_visitor(self, ph):
+        body = ph.handler(_event({"cloudfront-viewer-country": "US"}), None)["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/">' in body
+        assert 'href="https://pegsignal.com/?lang=en"' not in body
+
+    def test_og_image_stays_japanese_for_geolocated_english_visitor(self, ph):
+        body = ph.handler(_event({"cloudfront-viewer-country": "US"}), None)["body"]
+        assert '<meta property="og:image" content="https://pegsignal.com/og-image.jpg">' in body
+
+    def test_canonical_and_content_both_follow_explicit_lang_param(self, ph):
+        """?lang=enが明示されていれば、地理に関わらずcanonical/表示言語とも英語"""
+        r = ph.handler(_event({"cloudfront-viewer-country": "JP"}, lang="en"), None)
+        assert '<html lang="en"' in r["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/?lang=en">' in r["body"]
+
+
 class TestPreviewOgImageRoute:
     """/og-image.jpg(日本語)・/og-image-en.jpg(英語)がそれぞれのバナー画像を
     返すこと(2026-08-08追加、英語版は同日に言語別対応)。このルートはDynamoDB等を
