@@ -531,13 +531,32 @@ class TestPreviewShareMetaTags:
         body = ph.handler(_event(), None)["body"]
         assert '<meta property="og:image" content="https://cdn.example.com/banner.png">' in body
 
-    def test_canonical_and_og_url_use_public_origin_without_query_string(self, ph):
+    def test_canonical_and_og_url_use_public_origin_and_drop_src(self, ph):
         body = ph.handler(
             _event({"host": "abc123.lambda-url.us-east-1.on.aws"}, src="note"), None
         )["body"]
         assert '<meta property="og:url" content="https://pegsignal.com/">' in body
         assert '<link rel="canonical" href="https://pegsignal.com/">' in body
         assert "src=note" not in body
+
+    def test_canonical_keeps_lang_for_english_page(self, ph):
+        """langはsrcと違い別コンテンツを指すため、canonicalに残す必要がある
+        (2026-08-09、canonicalが常に/を指してしまい英語版・S&P500版が検索
+        エンジンから重複ページ扱いされていた不具合の修正)。"""
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/?lang=en">' in body
+
+    def test_canonical_keeps_universe_for_sp500_page(self, ph):
+        body = ph.handler(_event(universe="SP500"), None)["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/?universe=SP500">' in body
+
+    def test_canonical_keeps_both_lang_and_universe(self, ph):
+        body = ph.handler(_event(lang="en", universe="SP500"), None)["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/?lang=en&amp;universe=SP500">' in body
+
+    def test_canonical_drops_src_even_when_lang_is_kept(self, ph):
+        body = ph.handler(_event(lang="en", src="x"), None)["body"]
+        assert '<link rel="canonical" href="https://pegsignal.com/?lang=en">' in body
 
     def test_site_url_env_var_overrides_public_origin(self, ph):
         ph.PUBLIC_ORIGIN = "https://staging.example.com"
@@ -612,6 +631,29 @@ class TestPreviewPwaIcon:
     def test_manifest_link_uses_correct_lang_for_english_page(self, ph):
         body = ph.handler(_event(lang="en"), None)["body"]
         assert '<link rel="manifest" href="/manifest.json?lang=en">' in body
+
+
+class TestPreviewSeoRoutes:
+    """robots.txt・sitemap.xml(2026-08-09追加)。専用ルーティングが無かったため、
+    これらのパスへのアクセスが通常のランキングページのHTMLになってしまい、
+    意図しない状態だった。Google検索流入の改善作業で発覚し対応した。"""
+
+    def test_robots_txt_allows_all_and_points_to_sitemap(self, ph):
+        r = ph.handler({"rawPath": "/robots.txt"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "text/plain; charset=utf-8"
+        assert "Allow: /" in r["body"]
+        assert "Sitemap: https://pegsignal.com/sitemap.xml" in r["body"]
+
+    def test_sitemap_xml_lists_all_lang_and_universe_combinations(self, ph):
+        r = ph.handler({"rawPath": "/sitemap.xml"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "application/xml; charset=utf-8"
+        body = r["body"]
+        assert "<loc>https://pegsignal.com/</loc>" in body
+        assert "<loc>https://pegsignal.com/?lang=en</loc>" in body
+        assert "<loc>https://pegsignal.com/?universe=SP500</loc>" in body
+        assert "<loc>https://pegsignal.com/?lang=en&amp;universe=SP500</loc>" in body
 
 
 class TestPreviewSrcTracking:
