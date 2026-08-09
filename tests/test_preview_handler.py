@@ -554,6 +554,17 @@ class TestPreviewShareMetaTags:
         body = ph.handler(_event(lang="en", universe="SP500"), None)["body"]
         assert '<link rel="canonical" href="https://pegsignal.com/?lang=en&amp;universe=SP500">' in body
 
+    def test_no_google_site_verification_tag_by_default(self, ph):
+        """GOOGLE_SITE_VERIFICATION環境変数が未設定(開発環境等)なら何も出さない"""
+        body = ph.handler(_event(), None)["body"]
+        assert "google-site-verification" not in body
+
+    def test_google_site_verification_tag_present_when_configured(self, ph):
+        ph.GOOGLE_SITE_VERIFICATION = "Wu7Sr87bikKsx6bMzrkBB3Ysonb0grky6CuHmJ7jvv0"
+        body = ph.handler(_event(), None)["body"]
+        assert ('<meta name="google-site-verification" '
+                'content="Wu7Sr87bikKsx6bMzrkBB3Ysonb0grky6CuHmJ7jvv0">') in body
+
     def test_canonical_drops_src_even_when_lang_is_kept(self, ph):
         body = ph.handler(_event(lang="en", src="x"), None)["body"]
         assert '<link rel="canonical" href="https://pegsignal.com/?lang=en">' in body
