@@ -531,6 +531,45 @@ class TestPreviewOgImageRoute:
         assert ph._OG_IMAGE_BYTES["ja"] != ph._OG_IMAGE_BYTES["en"]
 
 
+class TestPreviewPwaIcon:
+    """ホーム画面への追加(PWA/apple-touch-icon)対応(2026-08-08追加)。noteの
+    記事で「メール登録が不安ならURLをホーム画面に保存」と案内する前提として、
+    apex(pegsignal.com)側にもアイコン・マニフェストを用意した。"""
+
+    def test_icon_route_returns_the_bundled_png(self, ph):
+        r = ph.handler({"rawPath": "/icon.png"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "image/png"
+        assert r["isBase64Encoded"] is True
+        import base64
+        assert base64.b64decode(r["body"]) == ph._ICON_BYTES
+        assert len(ph._ICON_BYTES) > 0
+
+    def test_manifest_route_returns_valid_json_with_icon_url(self, ph):
+        r = ph.handler({"rawPath": "/manifest.json"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "application/manifest+json; charset=utf-8"
+        import json
+        manifest = json.loads(r["body"])
+        assert manifest["icons"][0]["src"] == "https://pegsignal.com/icon.png"
+        assert manifest["short_name"]
+
+    def test_manifest_name_switches_with_lang(self, ph):
+        body_en = ph.handler({"rawPath": "/manifest.json", "queryStringParameters": {"lang": "en"}}, None)["body"]
+        import json
+        assert json.loads(body_en)["name"] == ph._APP_NAME["en"]
+
+    def test_page_head_includes_apple_touch_icon_and_manifest_link(self, ph):
+        body = ph.handler(_event(), None)["body"]
+        assert '<link rel="apple-touch-icon" href="https://pegsignal.com/icon.png">' in body
+        assert '<link rel="manifest" href="/manifest.json?lang=ja">' in body
+        assert '<meta name="apple-mobile-web-app-capable" content="yes">' in body
+
+    def test_manifest_link_uses_correct_lang_for_english_page(self, ph):
+        body = ph.handler(_event(lang="en"), None)["body"]
+        assert '<link rel="manifest" href="/manifest.json?lang=en">' in body
+
+
 class TestPreviewSrcTracking:
     """告知文への?src=(例: note/x/hn)をアクセスログに残す。register-stock側の
     ?src=規約(lambda_register/handler.py)と揃えている(2026-08-08追加)。"""

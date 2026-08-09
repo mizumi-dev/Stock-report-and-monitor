@@ -44,6 +44,7 @@ landing-preview Lambda ハンドラ
 """
 import base64
 import html
+import json
 import os
 import random
 import re
@@ -450,6 +451,60 @@ def _resolve_og_image_url(lang: str) -> str:
     return ""
 
 
+# ホーム画面へ追加(PWA/apple-touch-icon)対応(2026-08-08追加)。noteの記事で
+# 「メール登録が不安ならURLをホーム画面に保存」と案内する予定だったが、apex
+# (pegsignal.com)側にはマニフェスト・アイコン指定が一切無く、追加すると
+# ページのスクリーンショットが代用アイコンになってしまうことが判明したため
+# 対応した。register-stock側は独自SVGを使うが、こちらは外部展開用に既に
+# 用意済みのPEGモノグラムのPNG(docs/assets/pegsignal-icon-square.png)を
+# 流用する(バナー画像と同じくicon.pngとしてhandler.pyの隣に同梱・配信)
+_ICON_PATH = os.path.join(os.path.dirname(__file__), "icon.png")
+_ICON_ROUTE = "/icon.png"
+_MANIFEST_ROUTE = "/manifest.json"
+_APP_SHORT_NAME = {LANG_JA: "PegSignal", LANG_EN: "PegSignal"}
+_APP_NAME = {LANG_JA: "PegSignal（PEGスクリーニング）", LANG_EN: "PegSignal PEG screening"}
+
+
+def _load_icon_bytes() -> bytes:
+    try:
+        with open(_ICON_PATH, "rb") as f:
+            return f.read()
+    except OSError as e:
+        print(f"[WARN] アイコン画像の読み込みに失敗: {e}")
+        return b""
+
+
+_ICON_BYTES = _load_icon_bytes()
+
+
+def _icon_response() -> dict:
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "image/png", "Cache-Control": "public, max-age=86400"},
+        "body": base64.b64encode(_ICON_BYTES).decode("ascii"),
+        "isBase64Encoded": True,
+    }
+
+
+def _manifest_response(lang: str) -> dict:
+    manifest = {
+        "name": _APP_NAME[lang],
+        "short_name": _APP_SHORT_NAME[lang],
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#f4f6f9",
+        "theme_color": "#0f172a",
+        "icons": [
+            {"src": f"{PUBLIC_ORIGIN}{_ICON_ROUTE}", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+        ],
+    }
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/manifest+json; charset=utf-8"},
+        "body": json.dumps(manifest, ensure_ascii=False),
+    }
+
+
 def _page(inner_html: str, lang: str, universe: str, status: int = 200,
           canonical_url: str = "", og_image_url: str = "") -> dict:
     preset = UNIVERSES[universe]
@@ -473,6 +528,14 @@ def _page(inner_html: str, lang: str, universe: str, status: int = 200,
         og_tags.append('<meta name="twitter:card" content="summary_large_image">')
     else:
         og_tags.append('<meta name="twitter:card" content="summary">')
+    if _ICON_BYTES:
+        icon_url = f"{PUBLIC_ORIGIN}{_ICON_ROUTE}"
+        og_tags.append(f'<link rel="apple-touch-icon" href="{html.escape(icon_url)}">')
+        og_tags.append(f'<link rel="icon" href="{html.escape(icon_url)}">')
+        og_tags.append(f'<link rel="manifest" href="{_MANIFEST_ROUTE}?lang={lang}">')
+        og_tags.append('<meta name="theme-color" content="#0f172a">')
+        og_tags.append('<meta name="apple-mobile-web-app-capable" content="yes">')
+        og_tags.append(f'<meta name="apple-mobile-web-app-title" content="{html.escape(_APP_SHORT_NAME[lang])}">')
     body = f"""<html lang="{lang}"><head><meta name="viewport" content="width=device-width,initial-scale=1">
     <meta charset="utf-8">
     <title>{title}</title>
@@ -509,14 +572,19 @@ def _is_probable_bot(user_agent: str) -> bool:
 def handler(event, context):
     path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
     headers = event.get("headers") or {}
+    params = event.get("queryStringParameters") or {}
     if path in _OG_IMAGE_ROUTES.values():
         image_lang = LANG_EN if path == _OG_IMAGE_ROUTES[LANG_EN] else LANG_JA
         if _OG_IMAGE_BYTES.get(image_lang):
             return _og_image_response(image_lang)
+    if path == _ICON_ROUTE and _ICON_BYTES:
+        return _icon_response()
+    if path == _MANIFEST_ROUTE:
+        manifest_lang = params.get("lang") if params.get("lang") in SUPPORTED_LANGS else LANG_JA
+        return _manifest_response(manifest_lang)
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
     referer_raw = headers.get("referer") or headers.get("Referer") or ""
     referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
-    params = event.get("queryStringParameters") or {}
     # 告知文の?src=をそのまま流入元ラベルとして記録する(例: ?src=note, ?src=x, ?src=hn)。
     # register-stock側と同じ規約(任意の英数字・アンダースコア・ハイフンのみ許可)
     src_raw = (params.get("src") or "").strip()
