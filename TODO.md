@@ -278,10 +278,34 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   - テスト追加(地理判定で表示言語が変わってもcanonical/og:imageは日本語の
     ままであること、表示言語の地理判定自体は退行していないこと)、
     全333件パス確認済み
-- **未着手（次のアクション）**: 上記SEO修正一式(canonical/og:imageの
-  lang・universe対応、robots.txt/sitemap.xml、地理判定との相互作用の修正)の
-  develop→master反映と本番確認。反映後、Google Search Consoleにsitemap.xmlを
-  登録すると効果測定・インデックス状況の確認がしやすくなる(未着手)
+- **対応済み(2026-08-09)**: 上記SEO修正一式(canonical/og:imageのlang・
+  universe対応、robots.txt/sitemap.xml、地理判定との相互作用の修正)を
+  develop→master反映。本番デプロイ成功・ユーザーによる実機確認も完了
+  (`/robots.txt`・`/sitemap.xml`・`?lang=en`時のcanonicalタグを確認済み)
+
+### 現時点(2026-08-09時点)のまとめ
+
+集客チャネル展開の一連の作業がひとまず完了。次にこのTODOを開くときのために
+状態を整理しておく。
+
+**完了しているもの**:
+- note記事(日本語、実装と突き合わせて表現を修正済み)・Xポスト(日本語・英語)・
+  Xプロフィール更新まで公開済み
+- landing-preview(`pegsignal.com`)のOGP/シェアカード・PWA対応・SEO基礎
+  (canonical/robots.txt/sitemap.xml)・地理判定による言語自動切替、いずれも
+  本番反映・動作確認済み
+- CLAUDE.mdに「ユーザーが明示的に依頼すればClaudeもmasterへマージしてよい」を
+  追記済み(既定はユーザー自身のマージのまま)
+
+**未着手・次にやること**:
+- **Google Search Consoleへの`sitemap.xml`登録**(Claude側では実行不可、
+  ユーザー操作が必要)。登録後、インデックス状況・検索流入の確認が可能になる
+- **Hacker News投稿**: `docs/growth-drafts.md`に英文・投稿手順を用意済みだが、
+  ユーザーの心理的ハードルが高く保留中。急ぎではない
+- **Instagram**: コンテンツ形態(テキスト・データ主体)とキャプションに
+  リンクを貼れない仕様が合わないため見送り済み(再検討の必要があれば別途)
+- 投稿後のアクセス数・登録数の変化を`?src=note`・`?src=x`のCloudWatch Logsで
+  確認し、このファイルに記録する(まだ実施していない)
 
 ## 開発環境と本番環境の分離（2026-08-07）
 
@@ -415,6 +439,30 @@ https://claude.ai/code/artifact/7fcc4958-e0a7-4ecb-a5f1-b17402696276
 ---
 
 ## 優先度: 中（今は困らないが、育てるなら要る）
+
+### 6b. deploy_domain*.shのオリジンリクエストポリシーIDが実際の本番設定と乖離（2026-08-09発見）
+
+`deploy_domain.sh`・`deploy_domain_app.sh`・`deploy_domain_en.sh`・
+`deploy_domain_preview.sh`に書かれているオリジンリクエストポリシーIDは
+旧`AllViewerExceptHostHeader`(`b689b0a8-...`)のままだが、**実際の本番
+CloudFrontディストリビューションは地理判定機能の障害対応時に別ポリシー
+(`643c97ed-3ba1-4ce5-b107-ba7921f18f07`、whitelist方式でUser-Agent・
+Referer・CloudFront-Viewer-Countryを明示転送・Hostは含めない)へ切替済み**
+(詳細は`TODO_ARCHIVE.md`「訪問者の地理的位置による言語判定」節参照)。
+
+各スクリプトは既存ディストリビューションがあれば設定を上書きしない作りの
+ため、**現状は無害**(実際に動いているのは正しい新ポリシー)。ただし将来
+これらのスクリプトを使ってディストリビューションをゼロから作り直す・
+再作成すると、旧ポリシーが適用されて地理判定が黙って壊れる
+(`CloudFront-Viewer-Country`ヘッダーが転送されず、地理による言語自動
+切り替えが機能しなくなる)。
+
+**未着手**: 各`deploy_domain*.sh`のポリシーID記載を実際の`643c97ed-...`に
+更新する。急ぎではないが、スクリプトを実行する前に気づかず旧ポリシーで
+上書きしてしまうリスクがあるため、次にこれらのスクリプトを触る際は
+真っ先に確認すること。
+
+---
 
 ### 6a. マルチテナント化 — 対応済み、次点タスクあり（2026-08-02）
 
