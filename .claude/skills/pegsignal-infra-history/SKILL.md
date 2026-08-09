@@ -70,6 +70,42 @@ origin-request policy (`b689b0a8-53d0-40ab-baf2-68738e2966ac`) → Route53
 ALIAS A-record (CloudFront's fixed hosted-zone-id `Z2FDTNDATAQYW2`). Reuse
 this pattern rather than inventing a new one for the next subdomain.
 
+### Origin Request Policy incident (2026-08-09) — do not use `allViewer*` with Lambda Function URL origins
+
+To forward `CloudFront-Viewer-Country` to the origin (for geo-based default
+language), the Origin Request Policy on `pegsignal.com` and
+`app.pegsignal.com` was switched from the managed
+`AllViewerExceptHostHeader` (`b689b0a8-53d0-40ab-baf2-68738e2966ac`,
+`HeaderBehavior: allExcept` with `Headers: [host]`) to a custom policy using
+`HeaderBehavior: allViewerAndWhitelistCloudFront`. **This took production
+down entirely** — `allViewerAndWhitelistCloudFront` forwards *all* viewer
+headers including `Host`, and a Lambda Function URL origin rejects any
+request whose `Host` doesn't match its own domain. The managed
+`AllViewerExceptHostHeader` policy exists specifically to avoid this; there
+is no equivalent "allViewerAndWhitelistCloudFront except Host" option.
+
+The fix that actually worked: a custom policy with `HeaderBehavior:
+whitelist` and an explicit `Headers` list (`User-Agent`, `Referer`,
+`CloudFront-Viewer-Country` — only what the Lambda code actually reads, via
+`grep -n 'headers.get('` across both handlers). `whitelist` never forwards
+anything not explicitly listed, so omitting `Host` is sufficient — no
+`allExcept`-style exclusion needed. Rule of thumb for any origin request
+policy touching a Lambda Function URL origin: **never use `allViewer` or
+`allViewerAndWhitelistCloudFront`**; use `whitelist` with an explicit,
+minimal header list instead. (Custom origin *headers* set via
+`CustomHeaders` on the Origin config, like `X-Site-Lang`, are unaffected by
+any of this — CloudFront adds those unconditionally regardless of the
+Origin Request Policy.)
+
+Also: `Status: Deployed` on a CloudFront distribution only confirms the
+config propagated — it says nothing about whether the origin actually
+responds. This sandbox has no outbound HTTP path to the live domains, so
+there is no way to verify end-to-end from here. After any Origin Request
+Policy / Origin config change to a production distribution, apply to one
+distribution at a time and get the user to confirm in a real browser before
+touching the next one — don't batch multiple distributions on an unverified
+change.
+
 ## Email: Resend instead of SES
 
 SES production-access review was repeatedly rejected with no path to

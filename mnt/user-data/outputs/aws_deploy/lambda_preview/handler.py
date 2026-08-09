@@ -51,7 +51,7 @@ import re
 
 import boto3
 
-from config import SETTINGS_TABLE_DEFAULT, UNIVERSES, normalize_universe, selection_snapshot_key
+from config import DEFAULT_UNIVERSE, SETTINGS_TABLE_DEFAULT, UNIVERSES, normalize_universe, selection_snapshot_key
 from report import LANG_EN, LANG_JA, render_selection_cards, selection_subject, t
 
 SETTINGS_TABLE = os.environ.get("SETTINGS_TABLE", SETTINGS_TABLE_DEFAULT)
@@ -92,6 +92,27 @@ def _detect_lang(event) -> str:
     if country:
         return LANG_JA if country == "JP" else LANG_EN
     value = (headers.get("x-site-lang") or "").strip().lower()
+    return value if value in SUPPORTED_LANGS else LANG_JA
+
+
+def _explicit_lang(event) -> str:
+    """canonical・og:image専用の言語判定(2026-08-09追加)。_detect_lang()と違い、
+    地理判定・X-Site-Langは一切見ず、URLに明示された?lang=だけを見る(無指定なら
+    既定のja)。
+
+    地理判定はGooglebot等のクローラーにも等しく適用される(大半が米国IPから
+    アクセスするため、地理判定込みのlangをcanonical/og:imageに使うと英語判定
+    されてしまう)。その結果、noteやXで日本語向けに共有した素のURL
+    (pegsignal.com/)が「このページの正規版は英語です」と自己申告してしまい、
+    Googleが日本語トップページを独立にインデックスしなくなる・SNSクローラーが
+    英語バナーを取得してしまう、という実害が出た(develop環境での本番反映前
+    レビューで発覚)。
+
+    ページの表示言語自体(_detect_lang()の結果)は地理判定を維持したまま、
+    「そのURLの正規形が何語か」という決定的な申告だけを、地理に左右されない
+    形にする。"""
+    params = event.get("queryStringParameters") or {}
+    value = (params.get("lang") or "").strip().lower()
     return value if value in SUPPORTED_LANGS else LANG_JA
 
 
@@ -515,6 +536,45 @@ def _manifest_response(lang: str) -> dict:
     }
 
 
+# robots.txt・sitemap.xml(2026-08-09追加)。専用ルーティングが無かったため、
+# これらのパスにアクセスすると通常のランキングページがそのまま返っていた
+# (Googleのrobots.txt仕様上は致命的ではないが、意図しない状態だった)。
+# lang×universeの組み合わせ(現状2×2=4通り)をsitemapに列挙する。モード
+# (短期/中期/長期)はページ内アンカーであり別リソースではないため列挙しない
+_ROBOTS_ROUTE = "/robots.txt"
+_SITEMAP_ROUTE = "/sitemap.xml"
+
+
+def _robots_response() -> dict:
+    body = f"User-agent: *\nAllow: /\n\nSitemap: {PUBLIC_ORIGIN}{_SITEMAP_ROUTE}\n"
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "text/plain; charset=utf-8"},
+        "body": body,
+    }
+
+
+def _sitemap_response() -> dict:
+    urls = []
+    for lang in SUPPORTED_LANGS:
+        for universe in UNIVERSES:
+            params = []
+            if lang != LANG_JA:
+                params.append(f"lang={lang}")
+            if universe != DEFAULT_UNIVERSE:
+                params.append(f"universe={universe}")
+            qs = f"?{'&'.join(params)}" if params else ""
+            urls.append(f"{PUBLIC_ORIGIN}/{qs}")
+    entries = "".join(f"<url><loc>{html.escape(u)}</loc></url>" for u in urls)
+    body = f'<?xml version="1.0" encoding="UTF-8"?>' \
+           f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{entries}</urlset>'
+    return {
+        "statusCode": 200,
+        "headers": {"Content-Type": "application/xml; charset=utf-8"},
+        "body": body,
+    }
+
+
 def _page(inner_html: str, lang: str, universe: str, status: int = 200,
           canonical_url: str = "", og_image_url: str = "") -> dict:
     preset = UNIVERSES[universe]
@@ -592,6 +652,10 @@ def handler(event, context):
     if path == _MANIFEST_ROUTE:
         manifest_lang = params.get("lang") if params.get("lang") in SUPPORTED_LANGS else LANG_JA
         return _manifest_response(manifest_lang)
+    if path == _ROBOTS_ROUTE:
+        return _robots_response()
+    if path == _SITEMAP_ROUTE:
+        return _sitemap_response()
     user_agent = (headers.get("user-agent") or headers.get("User-Agent") or "")[:120]
     referer_raw = headers.get("referer") or headers.get("Referer") or ""
     referer = referer_raw.replace("\n", " ").replace("\r", " ")[:200]
@@ -608,8 +672,26 @@ def handler(event, context):
     inner = (_intro_html(lang, universe, REGISTER_URL) + _disclaimer_html(lang) + _universe_nav_html(lang, universe)
              + _mode_nav_html(lang) + sections + _signup_pitch_html(lang, REGISTER_URL))
     # og:url/canonicalはsrc等のトラッキングクエリを含めない(シェア・インデックス
-    # されるURLをクリーンに保つため)。ホスト名はHostヘッダーではなく
-    # PUBLIC_ORIGINを使う(理由はPUBLIC_ORIGINの定義箇所のコメントを参照)
-    canonical_url = f"{PUBLIC_ORIGIN}{path}"
-    og_image_url = _resolve_og_image_url(lang)
+    # されるURLをクリーンに保つため)。ホスト名はHostヘッダーではなくPUBLIC_ORIGINを
+    # 使う(理由はPUBLIC_ORIGINの定義箇所のコメントを参照)。
+    #
+    # ただしuniverseはsrcと違い「同じページの別バリエーション」を指すクエリでは
+    # なく、実際に中身が変わる別コンテンツを指すため、canonicalから落としてしまう
+    # とS&P500版が日本語版NASDAQ100版の重複ページとみなされ検索インデックスされ
+    # なくなる(2026-08-09、Google検索流入の改善作業で発覚し修正)。
+    #
+    # langは地理判定を含まない_explicit_lang()(URLに明示された?lang=のみ)を使う
+    # (2026-08-09、地理判定込みのlangを使うと、日本語向けに共有した素のURLが
+    # 米国IPのGooglebot/SNSクローラーから見たときだけ英語版として自己申告して
+    # しまう不具合が発覚したため。表示言語自体=lang変数は地理判定込みのままで、
+    # canonical/og:imageの申告だけを決定的にする)
+    canonical_lang = _explicit_lang(event)
+    canonical_params = []
+    if canonical_lang != LANG_JA:
+        canonical_params.append(f"lang={canonical_lang}")
+    if universe != DEFAULT_UNIVERSE:
+        canonical_params.append(f"universe={universe}")
+    canonical_qs = "&".join(canonical_params)
+    canonical_url = f"{PUBLIC_ORIGIN}{path}" + (f"?{canonical_qs}" if canonical_qs else "")
+    og_image_url = _resolve_og_image_url(canonical_lang)
     return _page(inner, lang, universe, canonical_url=canonical_url, og_image_url=og_image_url)
