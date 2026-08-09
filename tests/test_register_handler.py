@@ -295,6 +295,32 @@ class TestLanguage:
         assert r["statusCode"] == 200
         assert "お申込み" in r["body"]
 
+    def test_english_for_visitor_geolocated_outside_japan(self, rh):
+        """CloudFront-Viewer-Countryが日本以外なら、X-Site-Langが無くても英語を既定にする
+        (2026-08-07、海外流入向けに追加)。"""
+        r = rh.handler(_event(_headers={"cloudfront-viewer-country": "US"}), None)
+        assert "Sign up" in r["body"]
+        assert "お申込み" not in r["body"]
+
+    def test_japanese_for_visitor_geolocated_in_japan(self, rh):
+        r = rh.handler(_event(_headers={"cloudfront-viewer-country": "JP"}), None)
+        assert "お申込み" in r["body"]
+
+    def test_japanese_when_no_geolocation_header_present(self, rh):
+        """ヘッダー自体が無い場合(Function URL直叩き・開発環境等)は
+        従来通り日本語を既定とする(地理判定によって既定挙動を壊さない)。"""
+        r = rh.handler(_event(), None)
+        assert "お申込み" in r["body"]
+
+    def test_x_site_lang_header_overrides_geolocation(self, rh):
+        """X-Site-Lang(ドメイン固定、en.pegsignal.com等)はCloudFront-Viewer-Countryより優先される。"""
+        r = rh.handler(_event(_headers={"x-site-lang": "ja", "cloudfront-viewer-country": "US"}), None)
+        assert "お申込み" in r["body"]
+
+    def test_geolocation_country_code_is_case_insensitive(self, rh):
+        r = rh.handler(_event(_headers={"cloudfront-viewer-country": "jp"}), None)
+        assert "お申込み" in r["body"]
+
     def test_signup_stores_lang_from_header_on_new_registration(self, rh):
         rh.handler(_event(
             _headers={"x-site-lang": "en"}, signup_email="new@example.com",

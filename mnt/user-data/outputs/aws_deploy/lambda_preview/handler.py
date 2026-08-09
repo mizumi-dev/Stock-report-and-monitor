@@ -65,9 +65,10 @@ _ANCHOR = {"SHORT": "short", "MID": "mid", "LONG": "long"}
 
 
 def _detect_lang(event) -> str:
-    """?lang=クエリをX-Site-Langヘッダーより優先する(2026-08-08、?lang=enが
-    無視される不具合の修正)。
+    """優先順位: ?lang=(明示指定) > 訪問者の地理的位置(CloudFront-Viewer-Country、
+    日本ならja・それ以外はen) > X-Site-Lang(ドメイン固定) > 既定のja。
 
+    ?lang=を最優先にする理由(2026-08-08、?lang=enが無視される不具合の修正):
     register-stock(app.pegsignal.com/en.pegsignal.com)はドメインごとに
     X-Site-Langヘッダーが変わる構成なのでヘッダー優先で問題ないが、
     landing-previewはpegsignal.com一本(en側のサブドメインを持たない)で、
@@ -75,12 +76,21 @@ def _detect_lang(event) -> str:
     ところがpegsignal.comのCloudFrontはen.pegsignal.comとの対称性のため
     X-Site-Lang: jaを全リクエストに固定で付与している
     (deploy_patch_ja_lang_header.sh)。ヘッダーを先に見る実装だと、この
-    固定ヘッダーが常に勝ってしまい?lang=enが黙って無視される。"""
+    固定ヘッダーが常に勝ってしまい?lang=enが黙って無視される。
+
+    地理判定(CloudFront-Viewer-Country)を?lang=の次・X-Site-Langより前に
+    置く理由も同じ: X-Site-Langがpegsignal.comで常にjaを返す固定ヘッダーの
+    ままだと、ヘッダーを先に見た瞬間に地理判定が一切効かなくなる
+    (2026-08-07、海外流入向けに追加)。ヘッダー・地理情報のいずれも無い場合
+    (Function URL直叩き・開発環境等)はjaにフォールバックし、既定動作を壊さない。"""
     params = event.get("queryStringParameters") or {}
     value = (params.get("lang") or "").strip().lower()
     if value in SUPPORTED_LANGS:
         return value
     headers = event.get("headers") or {}
+    country = (headers.get("cloudfront-viewer-country") or "").strip().upper()
+    if country:
+        return LANG_JA if country == "JP" else LANG_EN
     value = (headers.get("x-site-lang") or "").strip().lower()
     return value if value in SUPPORTED_LANGS else LANG_JA
 

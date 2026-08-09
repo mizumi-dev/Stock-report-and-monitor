@@ -81,10 +81,19 @@ SUPPORTED_LANGS = (LANG_JA, LANG_EN)
 
 def _detect_request_lang(event) -> str:
     """トークンを持たない新規訪問者(申込みフォーム)向け。
-    ヘッダーがない場合(Function URL直叩き等)は日本語を既定とする"""
+    優先順位: X-Site-Lang(ドメイン固定、en.pegsignal.com等) > 訪問者の地理的位置
+    (CloudFront-Viewer-Country、日本ならja・それ以外はen) > 既定のja。
+    地理判定は「日本語が既定」という従来挙動を壊さないよう、ヘッダーが
+    無い場合(Function URL直叩き・開発環境等)はjaにフォールバックする
+    (2026-08-07、海外流入向けに追加)。"""
     headers = event.get("headers") or {}
     value = (headers.get("x-site-lang") or "").strip().lower()
-    return value if value in SUPPORTED_LANGS else LANG_JA
+    if value in SUPPORTED_LANGS:
+        return value
+    country = (headers.get("cloudfront-viewer-country") or "").strip().upper()
+    if country:
+        return LANG_JA if country == "JP" else LANG_EN
+    return LANG_JA
 
 
 def _get_user_lang(token_item: dict | None) -> str:
