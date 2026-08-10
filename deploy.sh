@@ -24,7 +24,7 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 # -----------------------------------
 
 # リポジトリのレイアウト（このスクリプトからの相対パス）
-DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py"
+DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py social.py"
 REGISTER_DIR="mnt/user-data/outputs/aws_deploy/lambda_register"
 LAYER_ZIP="layer.zip"
 

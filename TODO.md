@@ -1,10 +1,49 @@
 # 残課題
 
-最終更新: 2026-08-09
+最終更新: 2026-08-10
 
 完了したタスクは`TODO_ARCHIVE.md`に移動済み。ここには未着手・要検討の項目が
 残っているセクションのみを置く。
 
+## 集客の自動化（2026-08-10）
+
+「マーケティングを自動化して別サービス開発に移りたい」という要望を受けて
+expert-panel-reviewで検討。個別銘柄ページ(プログラマティックSEO)による
+本格的なSEO強化は、専業の銘柄分析サイトが既に多数存在し差別化が弱いこと・
+継続保守が発生し「手を離す」目的と矛盾することから、ユーザー判断で見送り。
+代わりに保守コストの低いX自動投稿と状態把握の自動化のみを実装する方針にした。
+
+- **対応済み**: 週次でランキング上位(選定レポートと同じ`selection_snapshot`、
+  新規スキャンなし)をXへ自動投稿する仕組みを追加。`social.py`(XPoster、
+  OAuth 1.0aでX API v2の`/2/tweets`を呼ぶ、mailer.pyのResendMailerと同じ
+  stdlibのみの構成)・`report.py`の`build_weekly_tweet_text()`(disclaimer_short
+  を新設し再利用)・`handler.py`の`post_weekly_tweet()`(選定レポートと同じ
+  曜日=`WEEKLY_REPORT_WEEKDAY`に発火)を追加。投稿失敗はメール配信(本来の役務)
+  を止めないよう例外を握りつぶす。テスト追加(`tests/test_social.py`・
+  `tests/test_weekly_tweet.py`、`build_weekly_tweet_text`のテストは
+  `tests/test_report.py`に追加)、全351件パス確認済み
+- **未着手（ユーザー行動待ち・ブロッカー）**: `X_POST_ENABLED`は既定`false`
+  (developでの手動起動時に誤って実アカウントへ投稿するのを防ぐための明示的な
+  オプトイン、`SIGNUPS_ENABLED`と同じ考え方)。有効化するには次がユーザー側で必要:
+  1. X Developer Portalでアプリを作成し、OAuth 1.0a の Read/Write 権限で
+     API Key/Secret・投稿元アカウントのAccess Token/Secretを発行する
+     (Claude側では代行不可、X側の本人確認・アプリ登録が要るため)
+  2. 発行した4値を`daily-batch`(本番)・`daily-batch-dev`(開発、動作確認したい
+     場合)のLambda環境変数に`X_API_KEY`・`X_API_SECRET`・`X_ACCESS_TOKEN`・
+     `X_ACCESS_TOKEN_SECRET`として設定する(`RESEND_API_KEY`と同じ運用、
+     このリポジトリにはコミットしない)
+  3. 開発環境で動作確認したい場合のみ`daily-batch-dev`に`X_POST_ENABLED=true`
+     を設定して手動起動(`daily-batch-dev`はEventBridge定期実行が無いため、
+     テスト用アカウントでの投稿確認に使う想定)。本番で有効化する場合は
+     `daily-batch`に`X_POST_ENABLED=true`を設定する
+- **未着手（次のアクション）**: develop→master反映・本番デプロイ後の動作確認
+  (実際にXへ投稿されるか)は、上記のAPIキー発行がユーザー側で完了してから
+  行う
+- **見送り（2026-08-10、expert-panel-reviewで検討）**: 個別銘柄ページによる
+  プログラマティックSEO。既存の専業サイトとの差別化が弱く、対象範囲を広げる
+  ほど保守負荷が増え「手を離したい」という目的と矛盾するため今回は行わない。
+  再検討する場合は`selection_snapshot`の保存範囲(現状`DEFAULT_TOP_N=3`)を
+  拡張する設計から検討し直すこと
 
 ## 【最優先】マネタイズ最速化ロードマップ（2026-08-07、ユーザー指示で優先度再編）
 

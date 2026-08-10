@@ -29,6 +29,10 @@ T = {
             "your own investment decisions."
         ),
     },
+    "disclaimer_short": {
+        LANG_JA: "※機械的な計算結果の共有であり、投資助言・売買の推奨ではありません",
+        LANG_EN: "Mechanically computed results, not investment advice or a solicitation.",
+    },
     "summary_label": {LANG_JA: "🔎 サマリー", LANG_EN: "🔎 Summary"},
     "monitoring_heading": {LANG_JA: "📊 本日の監視レポート", LANG_EN: "📊 Today's monitoring report"},
     "no_candidates": {LANG_JA: "本日、足切り条件を通過した銘柄はありませんでした。",
@@ -115,6 +119,33 @@ def _universe_note(universe: str, lang: str) -> str:
     label = preset["label_en"] if lang == LANG_EN else preset["label"]
     text = f"Universe: {label}" if lang == LANG_EN else f"対象指数: {label}"
     return f'<p style="color:#888;font-size:12px;">{text}</p>'
+
+
+def build_weekly_tweet_text(ranked: list[dict], mode: str, universe: str, url: str,
+                            lang: str = LANG_JA) -> str:
+    """週次のX投稿本文を組み立てる。selection_snapshotの上位銘柄をそのまま使い、
+    新規の文章生成・計算は行わない(免責はT辞書のdisclaimer_shortを再利用)。"""
+    mode_label = _mode_label(mode, lang)
+    universe_preset = get_universe_preset(universe)
+    universe_label = universe_preset["label_en"] if lang == LANG_EN else universe_preset["label"]
+
+    lines = []
+    for i, s in enumerate(ranked, start=1):
+        try:
+            peg_text = f"{float(s.get('peg')):.2f}"
+        except (TypeError, ValueError):
+            peg_text = "-"
+        lines.append(f"{i}. {s['ticker']} (PEG {peg_text})")
+    ranking_block = "\n".join(lines)
+
+    if lang == LANG_EN:
+        heading = f"PegSignal weekly PEG screen ({universe_label} / {mode_label})"
+        cta = f"Free, no signup needed: {url}"
+    else:
+        heading = f"🔎 PegSignalの週次PEGスクリーニング（{universe_label}・{mode_label}モード）"
+        cta = f"無料・登録不要で閲覧: {url}"
+
+    return f"{heading}\n\n{ranking_block}\n\n{cta}\n\n{t('disclaimer_short', lang)}"
 
 
 # 選定レポートの見出し・件名は、判定期間モードに応じて「本日の/今週の/今月の」を
