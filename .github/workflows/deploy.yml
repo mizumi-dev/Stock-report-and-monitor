@@ -66,17 +66,24 @@ jobs:
           (cd mnt/user-data/outputs/aws_deploy/lambda_preview && zip "$OLDPWD/preview.zip" handler.py og-image.jpg og-image-en.jpg icon.png)
           zip -j preview.zip config.py report.py
 
+      # --queryでコマンド出力を必要最小限のフィールドに絞る。update-function-codeは
+      # 成功時にLambdaの設定全体(環境変数=APIキー等を含む)をJSONで返し、それを
+      # そのまま標準出力に流すとActionsのログに平文で残ってしまう
+      # (2026-08-10発見、RESEND_API_KEY・X_API_KEY等が漏れていた実インシデント対応)。
       - name: Deploy daily-batch
         run: |
           aws lambda update-function-code --function-name "$BATCH_FN" \
-            --zip-file fileb://daily_batch.zip --region "$AWS_REGION"
+            --zip-file fileb://daily_batch.zip --region "$AWS_REGION" \
+            --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
       - name: Deploy register-stock
         run: |
           aws lambda update-function-code --function-name "$REGISTER_FN" \
-            --zip-file fileb://register.zip --region "$AWS_REGION"
+            --zip-file fileb://register.zip --region "$AWS_REGION" \
+            --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
       - name: Deploy landing-preview
         run: |
           aws lambda update-function-code --function-name "$PREVIEW_FN" \
-            --zip-file fileb://preview.zip --region "$AWS_REGION"
+            --zip-file fileb://preview.zip --region "$AWS_REGION" \
+            --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
