@@ -30,7 +30,7 @@ RESEND_API_KEY=$(aws lambda get-function-configuration --function-name register-
 LAYER_ARN=$(aws lambda get-function-configuration --function-name daily-batch \
   --region $AWS_REGION --query "Layers[0].Arn" --output text)
 
-DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py"
+DAILY_BATCH_FILES="handler.py config.py signals.py data_sources.py ranking.py report.py mailer.py social.py"
 REGISTER_DIR="mnt/user-data/outputs/aws_deploy/lambda_register"
 PREVIEW_DIR="mnt/user-data/outputs/aws_deploy/lambda_preview"
 

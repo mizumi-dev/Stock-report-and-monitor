@@ -1,10 +1,49 @@
 # 残課題
 
-最終更新: 2026-08-09
+最終更新: 2026-08-10
 
 完了したタスクは`TODO_ARCHIVE.md`に移動済み。ここには未着手・要検討の項目が
 残っているセクションのみを置く。
 
+## 集客の自動化（2026-08-10）
+
+「マーケティングを自動化して別サービス開発に移りたい」という要望を受けて
+expert-panel-reviewで検討。個別銘柄ページ(プログラマティックSEO)による
+本格的なSEO強化は、専業の銘柄分析サイトが既に多数存在し差別化が弱いこと・
+継続保守が発生し「手を離す」目的と矛盾することから、ユーザー判断で見送り。
+代わりに保守コストの低いX自動投稿と状態把握の自動化のみを実装する方針にした。
+
+- **対応済み**: 週次でランキング上位(選定レポートと同じ`selection_snapshot`、
+  新規スキャンなし)をXへ自動投稿する仕組みを追加。`social.py`(XPoster、
+  OAuth 1.0aでX API v2の`/2/tweets`を呼ぶ、mailer.pyのResendMailerと同じ
+  stdlibのみの構成)・`report.py`の`build_weekly_tweet_text()`(disclaimer_short
+  を新設し再利用)・`handler.py`の`post_weekly_tweet()`(選定レポートと同じ
+  曜日=`WEEKLY_REPORT_WEEKDAY`に発火)を追加。投稿失敗はメール配信(本来の役務)
+  を止めないよう例外を握りつぶす。テスト追加(`tests/test_social.py`・
+  `tests/test_weekly_tweet.py`、`build_weekly_tweet_text`のテストは
+  `tests/test_report.py`に追加)、全351件パス確認済み
+- **未着手（ユーザー行動待ち・ブロッカー）**: `X_POST_ENABLED`は既定`false`
+  (developでの手動起動時に誤って実アカウントへ投稿するのを防ぐための明示的な
+  オプトイン、`SIGNUPS_ENABLED`と同じ考え方)。有効化するには次がユーザー側で必要:
+  1. X Developer Portalでアプリを作成し、OAuth 1.0a の Read/Write 権限で
+     API Key/Secret・投稿元アカウントのAccess Token/Secretを発行する
+     (Claude側では代行不可、X側の本人確認・アプリ登録が要るため)
+  2. 発行した4値を`daily-batch`(本番)・`daily-batch-dev`(開発、動作確認したい
+     場合)のLambda環境変数に`X_API_KEY`・`X_API_SECRET`・`X_ACCESS_TOKEN`・
+     `X_ACCESS_TOKEN_SECRET`として設定する(`RESEND_API_KEY`と同じ運用、
+     このリポジトリにはコミットしない)
+  3. 開発環境で動作確認したい場合のみ`daily-batch-dev`に`X_POST_ENABLED=true`
+     を設定して手動起動(`daily-batch-dev`はEventBridge定期実行が無いため、
+     テスト用アカウントでの投稿確認に使う想定)。本番で有効化する場合は
+     `daily-batch`に`X_POST_ENABLED=true`を設定する
+- **未着手（次のアクション）**: develop→master反映・本番デプロイ後の動作確認
+  (実際にXへ投稿されるか)は、上記のAPIキー発行がユーザー側で完了してから
+  行う
+- **見送り（2026-08-10、expert-panel-reviewで検討）**: 個別銘柄ページによる
+  プログラマティックSEO。既存の専業サイトとの差別化が弱く、対象範囲を広げる
+  ほど保守負荷が増え「手を離したい」という目的と矛盾するため今回は行わない。
+  再検討する場合は`selection_snapshot`の保存範囲(現状`DEFAULT_TOP_N=3`)を
+  拡張する設計から検討し直すこと
 
 ## 【最優先】マネタイズ最速化ロードマップ（2026-08-07、ユーザー指示で優先度再編）
 
@@ -325,7 +364,35 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
     読み取り専用(DynamoDB IAMロールも`GetItem`のみ)でシェルコマンド実行等も
     無いため実害は無い(公開Webサーバーには一般的な背景ノイズ)
 
+**流入増加策のexpert-panel-review(2026-08-10、Opus)**: 「実流入が少ない」相談を
+受け、SEOエンジニア・グロース担当・金融メディア編集者・プロダクトアナリストの
+4名で検討。株式/投資はGoogleのYMYL(Your Money Your Life)領域でE-E-A-Tの
+要求が厳しく、匿名個人サイトがSEO単独で上位を取るのは期待薄と判断。優先順位:
+1) Zenn/Qiitaへの技術記事(日本語・非同期でHacker Newsの心理的ハードルを回避
+しつつ同種の効果)、2) noteでの定期ランキング記事化(単発告知→コンテンツ供給へ)、
+3) SEO構造の最小修正(コストほぼゼロなので実施、下記)、4) `?src=`計測の徹底。
+銘柄ページの大量自動生成はthin content判定リスクのため却下。1・2はユーザー
+行動待ち(投稿はClaude代行不可)。
+
+- **対応済み(2026-08-10、上記3番)**: `app.pegsignal.com`(register-stock)に
+  `robots.txt`/`sitemap.xml`が無く、公開ページ(`?about`等)が検索エンジンに
+  一切伝わっていなかったため追加(PR #66)。招待トークン付きURL(`?token=...`)は
+  robots.txtで明示的にDisallow。**申込みフォームのトップページ(`/`、ランキング
+  非表示)は意図的にsitemapから除外**(PR #67、ユーザー指摘)。SEOのフロントドアは
+  ランキングが即見える`pegsignal.com`側に一本化する方針(2026-08-07決定)のため、
+  ランキングが出ないページを検索結果に出さないようにした。本番反映・実出力とも
+  確認済み
+- **対応済み(2026-08-10、上記2番)**: noteの定期記事化(週次)に向けて、下書きを
+  半自動生成するRoutine(トリガーID`trig_0125KbvsL5zgrXAnjvJjupr4`)を設定。
+  毎週月曜09:00(JST)に本セッションへ発火し、本番`landing-preview`から実データを
+  取得してX用・note用の下書き(`?src=x`・`?src=note`付き)を提示する。ユーザーの
+  一言コメント欄は空欄のまま残し、実際の投稿(コメント追加・コピー・貼り付け)は
+  必ずユーザー自身が行う(Claudeは投稿しない)。X用の下書きも同じ仕組みで
+  同時に作成するため、Zenn/Qiita記事とは別に、X投稿の負担も軽減される想定
+
 **未着手・次にやること**:
+- **Zenn/Qiitaへの技術記事**(上記パネルの本命施策、未着手)
+- **noteの定期ランキング記事化**(単発告知で終わらせず、記事を資産化する)
 - Search Console側でのインデックス状況・検索流入の確認(登録直後のため、
   反映まで数日〜数週間かかる見込み)
 - **Hacker News投稿**: `docs/growth-drafts.md`に英文・投稿手順を用意済みだが、

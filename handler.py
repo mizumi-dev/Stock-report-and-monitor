@@ -36,7 +36,8 @@ from data_sources import get_nasdaq100_tickers, get_sp500_tickers, get_stock_dat
 from mailer import ResendMailer
 from signals import calc_all_signals
 from ranking import rank_stocks
-from report import build_selection_report, build_monitoring_report, selection_subject
+from report import build_selection_report, build_monitoring_report, build_weekly_tweet_text, selection_subject
+from social import XPoster
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
 SIGNAL_HISTORY_TABLE = os.environ.get("SIGNAL_HISTORY_TABLE", "signal_history")
@@ -48,11 +49,21 @@ REGISTER_URL = os.environ["REGISTER_FUNCTION_URL"]
 IS_WEEKLY_REPORT_DAY = os.environ.get("WEEKLY_REPORT_WEEKDAY", "0")  # 0=月曜
 TOP_N = int(os.environ.get("TOP_N", "3"))
 
+# 集客の自動化(2026-08-10)。週1回、選定レポートと同じ曜日にランキング上位を
+# Xへ自動投稿する。X_POST_ENABLEDが"true"の環境でのみ動作させる
+# (developでの手動起動時に誤って実アカウントへ投稿してしまうのを防ぐための
+# 明示的なオプトイン。SIGNUPS_ENABLEDと同じ考え方)。
+X_POST_ENABLED = os.environ.get("X_POST_ENABLED", "false").lower() == "true"
+X_POST_MODE = os.environ.get("X_POST_MODE", "MID")
+X_POST_UNIVERSE = os.environ.get("X_POST_UNIVERSE", DEFAULT_UNIVERSE)
+PEGSIGNAL_URL = os.environ.get("PEGSIGNAL_URL", "https://pegsignal.com/")
+
 dynamodb = boto3.resource("dynamodb")
 # SESの本番アクセス審査がus-east-1・大阪どちらでも即時却下となり解決不能と
 # 判断したため、Resend(mailer.py)に乗り換えた。ses変数名・呼び出し方は
 # 既存コードとの互換のためそのまま残している。
 ses = ResendMailer()
+x_poster = XPoster()
 
 
 def _today_str():
@@ -476,7 +487,30 @@ def _dispatch(event: dict) -> dict:
     if selection_targets:
         run_selection_reports(selection_targets)
     run_monitoring_reports(users)
+    if weekday == IS_WEEKLY_REPORT_DAY:
+        post_weekly_tweet()
     return {"statusCode": 200, "body": "OK"}
+
+
+def post_weekly_tweet():
+    """週次でランキング上位をXへ投稿する(集客の自動化、2026-08-10)。保存済み
+    スナップショットを読むだけで新規スキャンは行わない(その組み合わせでまだ
+    一度もバッチが走っていない場合のみ、その場で1回スキャンする、既存の
+    send_selection_report_nowと同じフォールバック)。投稿の失敗はメール配信
+    (本来の役務)を止める理由にはならないため、ここで例外を握りつぶす。"""
+    if not X_POST_ENABLED:
+        return
+    try:
+        snapshot = get_selection_snapshot(X_POST_MODE, X_POST_UNIVERSE)
+        if snapshot is None:
+            ranked, _ = _scan_universe(X_POST_MODE, X_POST_UNIVERSE)
+        else:
+            ranked = snapshot["ranked"]
+        text = build_weekly_tweet_text(ranked, X_POST_MODE, X_POST_UNIVERSE,
+                                       url=f"{PEGSIGNAL_URL}?src=x_auto")
+        x_poster.post_tweet(text)
+    except Exception as e:
+        print(f"[WARN] 週次Xポストに失敗しました: {e}")
 
 
 def _notify_failure(event: dict, exc: Exception):

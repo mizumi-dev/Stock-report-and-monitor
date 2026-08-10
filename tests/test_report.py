@@ -5,7 +5,7 @@ report.py(HTMLメール本文生成)のテスト。
 HTMLサニタイザがクエリ文字列を正しく解釈できずリンクが機能しなくなることが
 実際に報告された(&amp;へのエスケープ漏れ)。同種の回帰を防ぐための最小テスト。
 """
-from report import build_monitoring_report, build_selection_report
+from report import build_monitoring_report, build_selection_report, build_weekly_tweet_text
 
 
 def test_selection_report_ticker_link_escapes_ampersand():
@@ -431,3 +431,31 @@ def test_selection_report_ai_prompt_link_carries_lang_when_english():
                             "trend_detail": {"buy_cross": True}}}
     body = build_selection_report(ranked, signals_map, "https://pegsignal.com/", "tok123", lang="en")
     assert 'href="https://pegsignal.com/?ai_prompt=1&amp;ticker=NVDA&amp;lang=en"' in body
+
+
+def test_weekly_tweet_text_includes_ranking_url_and_disclaimer():
+    ranked = [
+        {"ticker": "NVDA", "peg": 1.234, "company_name": "NVIDIA"},
+        {"ticker": "AAPL", "peg": 2.05, "company_name": "Apple"},
+    ]
+    text = build_weekly_tweet_text(ranked, "MID", "NASDAQ100", url="https://pegsignal.com/?src=x_auto")
+
+    assert "1. NVDA (PEG 1.23)" in text
+    assert "2. AAPL (PEG 2.05)" in text
+    assert "https://pegsignal.com/?src=x_auto" in text
+    assert "投資助言・売買の推奨ではありません" in text
+    assert len(text) <= 280
+
+
+def test_weekly_tweet_text_handles_missing_peg_gracefully():
+    ranked = [{"ticker": "MSFT", "peg": None, "company_name": "Microsoft"}]
+    text = build_weekly_tweet_text(ranked, "MID", "NASDAQ100", url="https://pegsignal.com/")
+    assert "1. MSFT (PEG -)" in text
+
+
+def test_weekly_tweet_text_english():
+    ranked = [{"ticker": "NVDA", "peg": 1.2, "company_name": "NVIDIA"}]
+    text = build_weekly_tweet_text(ranked, "MID", "NASDAQ100", url="https://pegsignal.com/?lang=en",
+                                   lang="en")
+    assert "not investment advice" in text
+    assert "1. NVDA (PEG 1.20)" in text
