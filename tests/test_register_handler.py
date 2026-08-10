@@ -1150,8 +1150,6 @@ class TestSeoRoutes:
         assert r["statusCode"] == 200
         assert r["headers"]["Content-Type"] == "application/xml; charset=utf-8"
         body = r["body"]
-        assert "<loc>https://app.pegsignal.com/</loc>" in body
-        assert "<loc>https://app.pegsignal.com/?lang=en</loc>" in body
         assert "<loc>https://app.pegsignal.com/?about=1</loc>" in body
         assert "<loc>https://app.pegsignal.com/?about=1&amp;lang=en</loc>" in body
         assert "<loc>https://app.pegsignal.com/?guide=1</loc>" in body
@@ -1159,6 +1157,14 @@ class TestSeoRoutes:
         assert "<loc>https://app.pegsignal.com/?terms=1</loc>" in body
         assert "<loc>https://app.pegsignal.com/?contact=1</loc>" in body
         assert "<loc>https://app.pegsignal.com/?info=1</loc>" in body
+
+    def test_sitemap_excludes_signup_only_root_page(self, rh):
+        """ランキングが出ない申込みフォームのページ(/)は、SEOのフロントドアを
+        pegsignal.com(登録不要でランキングが即見える方)に一本化する方針
+        (2026-08-07決定)のため、意図的にsitemapへ含めない(2026-08-10)。"""
+        r = rh.handler({"rawPath": "/sitemap.xml"}, None)
+        assert "<loc>https://app.pegsignal.com/</loc>" not in r["body"]
+        assert "<loc>https://app.pegsignal.com/?lang=en</loc>" not in r["body"]
 
     def test_sitemap_does_not_leak_token_bearing_urls(self, rh):
         r = rh.handler({"rawPath": "/sitemap.xml"}, None)

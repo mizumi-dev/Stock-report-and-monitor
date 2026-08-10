@@ -281,13 +281,15 @@ def _page(inner_html: str, status=200, lang: str = LANG_JA):
     )
 
 
-# robots.txt/sitemap.xml(2026-08-10追加)。トークン不要で公開しているページ
-# (?about・?info・?guide・?privacy・?terms・?contact、およびトップの申込み画面)
-# だけを列挙する。招待トークンを含むURL(?token=...)は個人ごとの操作画面であり
-# 検索エンジンに知られるべきではないため、robots.txtで明示的に除外する
+# robots.txt/sitemap.xml(2026-08-10追加)。トークン不要で公開している情報ページ
+# (?about・?info・?guide・?privacy・?terms・?contact)だけを列挙する。招待トークンを
+# 含むURL(?token=...)は個人ごとの操作画面であり検索エンジンに知られるべきではない
+# ため、robots.txtで明示的に除外する。トップの申込みフォーム(/)は意図的に含めない:
+# SEOのフロントドアは「登録不要でランキングが即見えるpegsignal.com」に一本化する
+# 方針(2026-08-07決定)のため、ランキングが出ない申込みページを検索結果に出したくない
 _ROBOTS_ROUTE = "/robots.txt"
 _SITEMAP_ROUTE = "/sitemap.xml"
-_SITEMAP_PUBLIC_PAGES = ("", "about=1", "info=1", "guide=1", "privacy=1", "terms=1", "contact=1")
+_SITEMAP_PUBLIC_PAGES = ("about=1", "info=1", "guide=1", "privacy=1", "terms=1", "contact=1")
 
 
 def _robots_response() -> dict:
