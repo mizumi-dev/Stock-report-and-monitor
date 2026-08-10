@@ -1130,3 +1130,48 @@ class TestAiPrompt:
     def test_ai_prompt_disclaims_not_investment_advice(self, rh):
         r = rh.handler(_event(ai_prompt="1", ticker="NVDA"), None)
         assert "投資助言ではありません" in r["body"]
+
+
+class TestSeoRoutes:
+    """app.pegsignal.comにrobots.txt/sitemap.xmlが無く、公開ページ(?about等)が
+    検索エンジンに一切伝わっていなかった問題への対応(2026-08-10)。招待トークンを
+    含むURL(?token=...)は個人ごとの操作画面なので、robots.txtで明示的に除外する。"""
+
+    def test_robots_txt_is_plain_text_and_points_to_sitemap(self, rh):
+        r = rh.handler({"rawPath": "/robots.txt"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "text/plain; charset=utf-8"
+        assert "Allow: /" in r["body"]
+        assert "Disallow: /*?*token=*" in r["body"]
+        assert "Sitemap: https://app.pegsignal.com/sitemap.xml" in r["body"]
+
+    def test_sitemap_xml_lists_public_pages_in_both_languages(self, rh):
+        r = rh.handler({"rawPath": "/sitemap.xml"}, None)
+        assert r["statusCode"] == 200
+        assert r["headers"]["Content-Type"] == "application/xml; charset=utf-8"
+        body = r["body"]
+        assert "<loc>https://app.pegsignal.com/?about=1</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?about=1&amp;lang=en</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?guide=1</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?privacy=1</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?terms=1</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?contact=1</loc>" in body
+        assert "<loc>https://app.pegsignal.com/?info=1</loc>" in body
+
+    def test_sitemap_excludes_signup_only_root_page(self, rh):
+        """ランキングが出ない申込みフォームのページ(/)は、SEOのフロントドアを
+        pegsignal.com(登録不要でランキングが即見える方)に一本化する方針
+        (2026-08-07決定)のため、意図的にsitemapへ含めない(2026-08-10)。"""
+        r = rh.handler({"rawPath": "/sitemap.xml"}, None)
+        assert "<loc>https://app.pegsignal.com/</loc>" not in r["body"]
+        assert "<loc>https://app.pegsignal.com/?lang=en</loc>" not in r["body"]
+
+    def test_sitemap_does_not_leak_token_bearing_urls(self, rh):
+        r = rh.handler({"rawPath": "/sitemap.xml"}, None)
+        assert "token=" not in r["body"]
+
+    def test_sitemap_respects_site_url_override(self, rh):
+        rh.PUBLIC_ORIGIN = "https://app-dev.example.com"
+        r = rh.handler({"rawPath": "/sitemap.xml"}, None)
+        assert "https://app-dev.example.com/" in r["body"]
+        assert "app.pegsignal.com" not in r["body"]
