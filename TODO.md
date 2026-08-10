@@ -458,25 +458,34 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   が含まれているが、実害の低い情報のため今回は対応を見送り。気になる場合は
   別途削除を検討
 
-### RESEND_API_KEYがGitHub Actionsのdeployログに平文で出ている（2026-08-08発見、未対応）
+### APIキーがGitHub Actions/ローカルのdeployログに平文で出ていた問題 — 対応済み（2026-08-08発見→2026-08-10修正）
 
 集客展開作業でdeployワークフローのログを調査した際に発見。`aws lambda
-update-function-code`の実行結果(Lambda関数の設定情報、環境変数を含む)を
-そのまま標準出力に流しているため、`RESEND_API_KEY`の実際の値が
-`daily-batch`・`register-stock`両方のデプロイログに平文で残っている
-(`.github/workflows/deploy.yml`の「Deploy daily-batch」「Deploy
-register-stock」ステップ)。
+update-function-code`・`update-function-configuration`の実行結果(Lambda
+関数の設定情報、環境変数を含む)をそのまま標準出力に流していたため、
+`RESEND_API_KEY`が`daily-batch`・`register-stock`両方のデプロイログに
+平文で残っていた。2026-08-10、Xへの週次自動投稿機能の本番反映作業中に、
+同じ仕組みで新規発行した`X_API_KEY`・`X_API_SECRET`・`X_ACCESS_TOKEN`・
+`X_ACCESS_TOKEN_SECRET`の4つ全てが同様に本番デプロイログに平文で出て
+いることを実際に発見し、ユーザーから「また同じ穴に落ちるのでは」との
+指摘を受けて修正した。
 
 - リポジトリは既に非公開(private)なので、閲覧できるのは現時点のコラボレーター
-  のみ。ただし**Actionsのログは過去分も含めて今後も残り続ける**
-- ユーザーには2回(dev環境デプロイ時・本番デプロイ時)チャットで報告済みだが、
-  「対応するかどうか・タイミングはお任せ」との回答で、ファイルへの記録を
-  失念していた(このエントリで補完)
-- **未着手**: 対応するならGitHub Secretsに登録して`::add-mask::`を使うか、
-  `--query`でコマンド出力を絞る(例: `--query FunctionName`)などでログに
-  残さないようにする。緊急ではないが、対応するなら**Resend APIキーの
-  ローテーション(再発行)も合わせて検討**すべき(過去ログに残った値は
-  マスキングを後から追加しても消えないため)
+  のみ。ただし**Actionsのログは過去分も含めて今後も残り続ける**ため、
+  過去にログへ出力された値そのものは今回の対応では消えない
+- **対応済み**: `.github/workflows/deploy.yml`の3つのDeployステップ
+  (daily-batch・register-stock・landing-preview)、および`deploy.sh`・
+  `deploy_dev.sh`・`deploy_preview.sh`内の全ての`update-function-code`・
+  `update-function-configuration`呼び出しに
+  `--query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'`
+  を追加し、環境変数を含む完全なレスポンスがログ・ターミナルに出力
+  されないようにした
+- **未着手（ユーザー行動待ち）**: 過去ログに残った値は今回のマスキング
+  追加では消えないため、**Resend APIキー・X APIキー(4値)いずれも
+  ローテーション(再発行)を推奨**。特にX Access Token/Secretは第三者に
+  渡ると`@Cashphobia_`として任意の投稿ができてしまうため優先度が高い。
+  X_POST_ENABLEDはこの時点でまだ未設定のため、実際の投稿はまだ発生
+  していない
 
 ## 金商法(投資助言業)リスクの低減（2026-08-04）
 
