@@ -55,6 +55,11 @@ PREVIEW_URL = os.environ.get("PREVIEW_URL", "")
 # "false"にする。既存トークンでのアクセス(レポート受信・銘柄変更・退会等)には影響しない
 SIGNUPS_ENABLED = os.environ.get("SIGNUPS_ENABLED", "true").lower() != "false"
 
+# robots.txt/sitemap.xml用の公開URL(2026-08-10追加、landing-previewのPUBLIC_ORIGINと
+# 同じ理由: CloudFrontがAllViewerExceptHostHeaderポリシーでHostを転送しないため、
+# Hostヘッダーから組み立てると生のLambda Function URLを指してしまう)
+PUBLIC_ORIGIN = os.environ.get("SITE_URL", "https://app.pegsignal.com").rstrip("/")
+
 dynamodb = boto3.resource("dynamodb")
 lambda_client = boto3.client("lambda")
 # SESの本番アクセス審査がus-east-1・大阪どちらでも即時却下となり解決不能と
@@ -274,6 +279,39 @@ def _page(inner_html: str, status=200, lang: str = LANG_JA):
         </body></html>""",
         status=status,
     )
+
+
+# robots.txt/sitemap.xml(2026-08-10追加)。トークン不要で公開しているページ
+# (?about・?info・?guide・?privacy・?terms・?contact、およびトップの申込み画面)
+# だけを列挙する。招待トークンを含むURL(?token=...)は個人ごとの操作画面であり
+# 検索エンジンに知られるべきではないため、robots.txtで明示的に除外する
+_ROBOTS_ROUTE = "/robots.txt"
+_SITEMAP_ROUTE = "/sitemap.xml"
+_SITEMAP_PUBLIC_PAGES = ("", "about=1", "info=1", "guide=1", "privacy=1", "terms=1", "contact=1")
+
+
+def _robots_response() -> dict:
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /*?*token=*\n\n"
+        f"Sitemap: {PUBLIC_ORIGIN}{_SITEMAP_ROUTE}\n"
+    )
+    return {"statusCode": 200, "headers": {"Content-Type": "text/plain; charset=utf-8"}, "body": body}
+
+
+def _sitemap_response() -> dict:
+    urls = []
+    for page in _SITEMAP_PUBLIC_PAGES:
+        for lang in SUPPORTED_LANGS:
+            qs_parts = [p for p in (page, f"lang={lang}" if lang != LANG_JA else "") if p]
+            qs = "&".join(qs_parts)
+            loc = f"{PUBLIC_ORIGIN}/" + (f"?{qs}" if qs else "")
+            urls.append(f"<url><loc>{html.escape(loc)}</loc></url>")
+    body = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            + "".join(urls) + "</urlset>")
+    return {"statusCode": 200, "headers": {"Content-Type": "application/xml; charset=utf-8"}, "body": body}
 
 
 def _handle_manifest(lang: str = LANG_JA) -> dict:
@@ -1826,6 +1864,12 @@ def _access_log_fields(event: dict) -> tuple[str, str, str, str]:
 
 
 def handler(event, context):
+    path = event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path") or "/"
+    if path == _ROBOTS_ROUTE:
+        return _robots_response()
+    if path == _SITEMAP_ROUTE:
+        return _sitemap_response()
+
     params = event.get("queryStringParameters") or {}
     token = (params.get("token") or "").strip()
     path, user_agent, referer, is_bot = _access_log_fields(event)
