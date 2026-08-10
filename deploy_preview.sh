@@ -71,12 +71,14 @@ aws lambda create-function \
   --environment "Variables={REGISTER_URL=$REGISTER_URL,GOOGLE_SITE_VERIFICATION=$GOOGLE_SITE_VERIFICATION}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name landing-preview \
-    --zip-file fileb://preview.zip --region $AWS_REGION
+    --zip-file fileb://preview.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 aws lambda update-function-configuration \
   --function-name landing-preview \
   --environment "Variables={REGISTER_URL=$REGISTER_URL,GOOGLE_SITE_VERIFICATION=$GOOGLE_SITE_VERIFICATION}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 # 濫用でアカウントの同時実行枠を食い潰さないよう上限を設けたいが、既存のLambda群
 # (register-stock・daily-batch)が既に予約済みで、アカウント全体の未予約枠の下限

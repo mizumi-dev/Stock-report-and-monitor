@@ -142,7 +142,8 @@ aws lambda create-function \
   --environment "Variables={WATCHLIST_TABLE=watchlist-dev,APPROVED_TOKENS_TABLE=approved_tokens-dev,SETTINGS_TABLE=app_settings-dev,SIGNAL_HISTORY_TABLE=signal_history-dev,SES_SENDER=noreply@pegsignal.com,SES_RECIPIENT=amsllr759@gmail.com,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch-dev \
-    --zip-file fileb://daily_batch_dev.zip --region $AWS_REGION
+    --zip-file fileb://daily_batch_dev.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 echo "=== 4. register-stock-dev Lambda作成 + Function URL発行 ==="
 rm -f register_dev.zip
@@ -159,7 +160,8 @@ aws lambda create-function \
   --environment "Variables={WATCHLIST_TABLE=watchlist-dev,APPROVED_TOKENS_TABLE=approved_tokens-dev,SETTINGS_TABLE=app_settings-dev,MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch-dev,SES_SENDER=noreply@pegsignal.com,SES_RECIPIENT=amsllr759@gmail.com,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock-dev \
-    --zip-file fileb://register_dev.zip --region $AWS_REGION
+    --zip-file fileb://register_dev.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 aws lambda create-function-url-config --function-name register-stock-dev \
   --auth-type NONE --region $AWS_REGION || echo "(既に存在する場合はスキップ)"
@@ -181,10 +183,12 @@ echo "register-stock-dev URL: $REGISTER_DEV_URL"
 echo "=== 5. daily-batch-dev・register-stock-devにREGISTER_FUNCTION_URLを反映 ==="
 aws lambda update-function-configuration --function-name daily-batch-dev \
   --environment "Variables={WATCHLIST_TABLE=watchlist-dev,APPROVED_TOKENS_TABLE=approved_tokens-dev,SETTINGS_TABLE=app_settings-dev,SIGNAL_HISTORY_TABLE=signal_history-dev,SES_SENDER=noreply@pegsignal.com,SES_RECIPIENT=amsllr759@gmail.com,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_DEV_URL,TOP_N=10}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 aws lambda update-function-configuration --function-name register-stock-dev \
   --environment "Variables={WATCHLIST_TABLE=watchlist-dev,APPROVED_TOKENS_TABLE=approved_tokens-dev,SETTINGS_TABLE=app_settings-dev,MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch-dev,SES_SENDER=noreply@pegsignal.com,SES_RECIPIENT=amsllr759@gmail.com,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_DEV_URL}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 echo "=== 6. landing-preview-dev Lambda作成 + Function URL発行 ==="
 rm -f preview_dev.zip
@@ -201,11 +205,13 @@ aws lambda create-function \
   --environment "Variables={SETTINGS_TABLE=app_settings-dev,REGISTER_URL=$REGISTER_DEV_URL}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name landing-preview-dev \
-    --zip-file fileb://preview_dev.zip --region $AWS_REGION
+    --zip-file fileb://preview_dev.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 aws lambda update-function-configuration --function-name landing-preview-dev \
   --environment "Variables={SETTINGS_TABLE=app_settings-dev,REGISTER_URL=$REGISTER_DEV_URL}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 aws lambda create-function-url-config --function-name landing-preview-dev \
   --auth-type NONE --region $AWS_REGION || echo "(既に存在する場合はスキップ)"

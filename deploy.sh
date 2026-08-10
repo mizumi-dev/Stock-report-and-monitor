@@ -171,7 +171,8 @@ aws lambda create-function \
   --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER,TOP_N=10}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name daily-batch \
-    --zip-file fileb://daily_batch.zip --region $AWS_REGION
+    --zip-file fileb://daily_batch.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 echo "=== 7. register-stock Lambda 作成 + Function URL 発行 ==="
 rm -f register.zip
@@ -188,7 +189,8 @@ aws lambda create-function \
   --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=PLACEHOLDER}" \
   --region $AWS_REGION || \
   aws lambda update-function-code --function-name register-stock \
-    --zip-file fileb://register.zip --region $AWS_REGION
+    --zip-file fileb://register.zip --region $AWS_REGION \
+    --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 # 公開URLの濫用でアカウントの同時実行枠(上限10)を食い潰さないよう上限を設ける
 aws lambda put-function-concurrency \
@@ -232,17 +234,21 @@ echo "=== 8. daily-batch・register-stock双方の環境変数にREGISTER_URLを
 # 反映されない(create-functionは既存時にupdate-function-codeにフォールバックし
 # コードしか更新しない)ため、再デプロイ時にここで確実にタイムアウトを揃える
 # (TODO#8 S&P500導入前の事前準備、900秒はLambdaの上限)
+# --queryで出力を絞る(環境変数=APIキー等がターミナルにそのまま出るのを防ぐ、
+# 2026-08-10発見のログ平文流出インシデント対応)
 aws lambda update-function-configuration \
   --function-name daily-batch \
   --timeout 900 \
   --environment "Variables={SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_URL,TOP_N=10}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 # register-stock自身も、申込み確認メールのリンク生成に自分のURLを知る必要がある(自己参照)
 aws lambda update-function-configuration \
   --function-name register-stock \
   --environment "Variables={MAX_WATCHLIST_SIZE=5,DAILY_BATCH_FUNCTION=daily-batch,SES_SENDER=$SES_SENDER,SES_RECIPIENT=$SES_RECIPIENT,RESEND_API_KEY=$RESEND_API_KEY,REGISTER_FUNCTION_URL=$REGISTER_URL}" \
-  --region $AWS_REGION
+  --region $AWS_REGION \
+  --query '{FunctionName:FunctionName,LastUpdateStatus:LastUpdateStatus}'
 
 echo "=== 9. EventBridge Scheduler 設定(毎営業日 米東部6:00、米国市場の寄り付き(9:30 ET)より前) ==="
 # タイムゾーンをAmerica/New_Yorkで指定することで夏時間(DST)をAWS側が自動調整する。
