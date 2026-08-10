@@ -304,6 +304,27 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   ユーザーがSearch Console側で所有権確認・`sitemap.xml`送信・インデックス登録
   リクエストの3点を完了
 
+**完了しているもの(続き、2026-08-10追加)**:
+- `?src=`アクセス実績をCloudWatch Logs Insightsで確認(`landing-preview`本番
+  ログ、2026-08-06〜2026-08-10、計1934行)。集計:
+  - `src=note`: 4件(うち3件は`notebot`=note.comのOGPカード取得bot、
+    実訪問者は1件・2026-08-08 16:27 Mac Safari)
+  - `src=x`: 8件(`Twitterbot`のカード取得bot3件・`trendictionbot`/
+    `linkfluence`bot各1件、実訪問者は3件・うち1件は`referer=https://t.co/`で
+    実際のツイート経由クリックと確認できた)
+  - `src=hn`: 2件(2026-08-09 13時台、bot=False・UA空)。**Hacker Newsは
+    投稿していない**ため、これは`docs/growth-drafts.md`の下書きURLを
+    ユーザー自身か第三者が直接開いた可能性が高く、実際のHN流入ではない
+  - `approved_tokens`は2026-08-04時点の2件→現在3件(+1、どのチャネル経由かは
+    メール単位の紐付けが無いため特定不可)
+  - CloudWatch Logsの読み取り権限が`claude-deploy` IAMユーザーに
+    `landing-preview`分だけ無かったため、既存の`cloudwatch-logs-read`
+    インラインポリシーに追加(register-stock/daily-batchと同じ形に統一)
+  - 参考: 全アクセス中、脆弱性スキャナー・ボットによる`.env`/`wp-admin`等への
+    探索的アクセスが多数(全体の1〜2割程度)を占めるが、`landing-preview`は
+    読み取り専用(DynamoDB IAMロールも`GetItem`のみ)でシェルコマンド実行等も
+    無いため実害は無い(公開Webサーバーには一般的な背景ノイズ)
+
 **未着手・次にやること**:
 - Search Console側でのインデックス状況・検索流入の確認(登録直後のため、
   反映まで数日〜数週間かかる見込み)
@@ -311,8 +332,6 @@ Claudeが「マネージャー兼メインプレイヤー」として展開作�
   ユーザーの心理的ハードルが高く保留中。急ぎではない
 - **Instagram**: コンテンツ形態(テキスト・データ主体)とキャプションに
   リンクを貼れない仕様が合わないため見送り済み(再検討の必要があれば別途)
-- 投稿後のアクセス数・登録数の変化を`?src=note`・`?src=x`のCloudWatch Logsで
-  確認し、このファイルに記録する(まだ実施していない)
 
 ## 開発環境と本番環境の分離（2026-08-07）
 
