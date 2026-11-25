@@ -459,3 +459,34 @@ def test_weekly_tweet_text_english():
                                    lang="en")
     assert "not investment advice" in text
     assert "1. NVDA (PEG 1.20)" in text
+
+
+def test_multi_universe_selection_report_has_one_section_per_universe():
+    """対象指数を複数選んだ利用者向け(2026-11-25): 指数ごとの見出しとランキングが
+    1通の本文に並び、スナップショットの日付は指数ごとに表示される"""
+    from report import build_selection_report_multi
+    sections = [
+        {"universe": "NASDAQ100", "as_of": "2026-11-20",
+         "ranked": [{"ticker": "NDXX", "company_name": "Ndx Co", "peg": 1.0,
+                     "earnings_growth": 0.5, "market_cap": 1}],
+         "signals_map": {"NDXX": {}}},
+        {"universe": "SP500", "as_of": "2026-11-24",
+         "ranked": [{"ticker": "SPXX", "company_name": "Spx Co", "peg": 1.2,
+                     "earnings_growth": 0.4, "market_cap": 1}],
+         "signals_map": {"SPXX": {}}},
+    ]
+    body = build_selection_report_multi(sections, "https://pegsignal.com/", "tok123", "MID")
+    assert "対象指数: NASDAQ100" in body
+    assert "対象指数: S&amp;P500" in body
+    assert body.index("対象指数: NASDAQ100") < body.index("NDXX") < body.index("対象指数: S&amp;P500") < body.index("SPXX")
+    assert "2026-11-20時点のデータです" in body and "2026-11-24時点のデータです" in body
+    assert body.count("<h2>") == 1  # 件名相当の見出しは1つだけ(メールは1通)
+
+
+def test_multi_universe_selection_report_is_english_when_lang_is_en():
+    from report import build_selection_report_multi
+    sections = [{"universe": u, "ranked": [], "signals_map": {}, "as_of": None}
+                for u in ("NASDAQ100", "SP500")]
+    body = build_selection_report_multi(sections, "https://pegsignal.com/", "tok123", "MID", lang="en")
+    assert "Universe: NASDAQ100" in body and "Universe: S&amp;P 500" in body
+    assert "対象指数" not in body

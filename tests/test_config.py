@@ -9,6 +9,9 @@ from config import (
     UNIVERSES,
     get_universe_preset,
     normalize_universe,
+    normalize_universes,
+    universes_label,
+    universes_to_value,
     selection_snapshot_key,
     signal_history_date_key,
     universe_cache_key,
@@ -80,3 +83,34 @@ class TestSignalHistoryDateKeyBackwardCompatibility:
 
     def test_non_default_universe_gets_distinct_key(self):
         assert signal_history_date_key("2026-08-07", "MID", "SP500") == "2026-08-07#MID#SP500"
+
+
+class TestNormalizeUniverses:
+    """対象指数の複数選択(2026-11-25、チェックボックス化)。"""
+
+    def test_comma_separated_string_becomes_list_in_definition_order(self):
+        assert normalize_universes("SP500,NASDAQ100") == ["NASDAQ100", "SP500"]
+
+    def test_single_value_saved_before_multi_select_still_reads(self):
+        """プルダウン時代に保存された値("SP500")がそのまま読めること(後方互換)"""
+        assert normalize_universes("SP500") == ["SP500"]
+
+    def test_list_input_and_duplicates(self):
+        assert normalize_universes(["sp500", "SP500"]) == ["SP500"]
+
+    def test_unknown_values_are_dropped(self):
+        assert normalize_universes("NIKKEI225,SP500") == ["SP500"]
+
+    def test_empty_or_all_unknown_falls_back_to_default(self):
+        assert normalize_universes(None) == [DEFAULT_UNIVERSE]
+        assert normalize_universes("") == [DEFAULT_UNIVERSE]
+        assert normalize_universes("BOGUS") == [DEFAULT_UNIVERSE]
+
+    def test_round_trip_through_stored_value(self):
+        assert universes_to_value(["SP500", "NASDAQ100"]) == "NASDAQ100,SP500"
+        assert normalize_universes(universes_to_value(["SP500"])) == ["SP500"]
+
+    def test_label_joins_selected_universes(self):
+        assert universes_label(["NASDAQ100", "SP500"]) == "NASDAQ100・S&P500"
+        assert universes_label(["NASDAQ100", "SP500"], lang_en=True) == "NASDAQ100 + S&P 500"
+        assert universes_label(["SP500"]) == "S&P500"

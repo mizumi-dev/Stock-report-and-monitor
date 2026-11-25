@@ -857,22 +857,73 @@ class TestUniverse:
 
     def test_universe_switch_persists(self, rh):
         rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
-        assert rh.get_universe(VALID_TOKEN) == "SP500"
+        assert rh.get_universes(VALID_TOKEN) == ["SP500"]
         rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100"), None)
-        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"
+        assert rh.get_universes(VALID_TOKEN) == ["NASDAQ100"]
 
     def test_unknown_universe_falls_back_to_default(self, rh):
-        assert rh.get_universe(VALID_TOKEN) == "NASDAQ100"  # 未設定時はDEFAULT_UNIVERSE
+        assert rh.get_universes(VALID_TOKEN) == ["NASDAQ100"]  # 未設定時はDEFAULT_UNIVERSE
 
     def test_universe_is_isolated_per_user(self, rh):
         rh.dynamodb.Table("approved_tokens").put_item(
             Item={"token": "other-tok", "email": "o@example.com", "status": "approved"})
         rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
-        assert rh.get_universe("other-tok") == "NASDAQ100"  # 他人のユニバース変更は影響しない
+        assert rh.get_universes("other-tok") == ["NASDAQ100"]  # 他人のユニバース変更は影響しない
 
     def test_universe_change_notice_shows_new_universe_label(self, rh):
         r = rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
         assert "対象指数を「S&P500」に変更しました" in r["body"]
+
+
+class TestUniverseMultiSelect:
+    """対象指数をチェックボックスで複数選べる(2026-11-25)。同名チェックボックスを
+    複数送ると、Function URLではカンマ区切りの1つの値として届く"""
+
+    def test_form_uses_checkboxes_not_a_dropdown(self, rh):
+        body = rh.handler(_event(token=VALID_TOKEN), None)["body"]
+        assert '<input type="checkbox" name="universe" value="NASDAQ100" checked' in body
+        assert '<input type="checkbox" name="universe" value="SP500" style' in body  # 未選択
+        assert '<select name="universe"' not in body
+
+    def test_both_universes_can_be_selected(self, rh):
+        r = rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100,SP500", universe_set="1"), None)
+        assert rh.get_universes(VALID_TOKEN) == ["NASDAQ100", "SP500"]
+        assert "対象指数を「NASDAQ100・S&P500」に変更しました" in r["body"]
+        assert r["body"].count('name="universe" value="NASDAQ100" checked') == 1
+        assert r["body"].count('name="universe" value="SP500" checked') == 1
+
+    def test_repeated_params_in_raw_query_string_are_read(self, rh):
+        """ブラウザが実際に送る形(universe=...&universe=...)がrawQueryStringで届いた場合"""
+        event = _event(token=VALID_TOKEN, universe="SP500", universe_set="1")
+        event["rawQueryString"] = f"token={VALID_TOKEN}&universe_set=1&universe=NASDAQ100&universe=SP500"
+        rh.handler(event, None)
+        assert rh.get_universes(VALID_TOKEN) == ["NASDAQ100", "SP500"]
+
+    def test_can_go_back_to_a_single_universe(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100,SP500", universe_set="1"), None)
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500", universe_set="1"), None)
+        assert rh.get_universes(VALID_TOKEN) == ["SP500"]
+
+    def test_submitting_with_nothing_ticked_keeps_current_setting(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500", universe_set="1"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, universe_set="1"), None)
+        assert "対象指数は1つ以上選んでください" in r["body"]
+        assert rh.get_universes(VALID_TOKEN) == ["SP500"]
+
+    def test_unknown_universe_only_keeps_current_setting(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="SP500"), None)
+        rh.handler(_event(token=VALID_TOKEN, universe="NIKKEI225", universe_set="1"), None)
+        assert rh.get_universes(VALID_TOKEN) == ["SP500"]
+
+    def test_english_notice_and_labels(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, lang="en"), None)  # 言語設定は別操作で保存される
+        r = rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100,SP500", universe_set="1"), None)
+        assert 'Universe changed to "NASDAQ100 + S&P 500"' in r["body"]
+
+    def test_info_page_lists_both_selected_universes(self, rh):
+        rh.handler(_event(token=VALID_TOKEN, universe="NASDAQ100,SP500", universe_set="1"), None)
+        r = rh.handler(_event(token=VALID_TOKEN, info="1"), None)
+        assert "<strong>NASDAQ100・S&P500</strong>構成銘柄" in r["body"]
 
 
 class TestInfoPageUniverseWording:

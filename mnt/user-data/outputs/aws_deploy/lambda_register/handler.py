@@ -13,6 +13,7 @@ watchlistは(owner_token, ticker)の複合キー、期間モードはapp_setting
 """
 import base64
 import html
+import urllib.parse
 import json
 import os
 import random
@@ -32,10 +33,12 @@ from config import (
     UNIVERSES,
     get_preset,
     normalize_mode,
-    normalize_universe,
+    normalize_universes,
     universe_cache_key,
     user_period_mode_key,
     user_universe_key,
+    universes_label,
+    universes_to_value,
 )
 from mailer import ResendMailer
 
@@ -457,24 +460,48 @@ def set_period_mode(owner_token: str, mode: str) -> str:
     return mode
 
 
-def get_universe(owner_token: str) -> str:
-    """利用者が選んだ対象指数(ユニバース)。get_period_modeと同じ方針で、
-    設定が読めなくても画面は出したいので失敗時は既定(NASDAQ100)扱いにする。"""
+def get_universes(owner_token: str) -> list[str]:
+    """利用者が選んだ対象指数(ユニバース、複数可)。get_period_modeと同じ方針で、
+    設定が読めなくても画面は出したいので失敗時は既定(NASDAQ100のみ)扱いにする。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
         resp = table.get_item(Key={"key": user_universe_key(owner_token)})
-        return normalize_universe(resp.get("Item", {}).get("value"))
+        return normalize_universes(resp.get("Item", {}).get("value"))
     except Exception as e:
         print(f"[WARN] ユニバース取得に失敗: {e}")
-        return normalize_universe(None)
+        return normalize_universes(None)
 
 
-def set_universe(owner_token: str, universe: str) -> str:
-    universe = normalize_universe(universe)
+def set_universes(owner_token: str, universes) -> list[str]:
+    """チェックボックスで選ばれた対象指数を保存する。同名のチェックボックスを複数
+    送ると、Lambda Function URLのqueryStringParametersではカンマ区切りの1つの
+    文字列("NASDAQ100,SP500")になるので、それをそのまま渡せる。"""
+    universes = normalize_universes(universes)
     table = dynamodb.Table(SETTINGS_TABLE)
-    table.put_item(Item={"key": user_universe_key(owner_token), "value": universe,
+    table.put_item(Item={"key": user_universe_key(owner_token), "value": universes_to_value(universes),
                          "updated_at": datetime.now(timezone.utc).isoformat()})
-    return universe
+    return universes
+
+
+def _requested_universes(event) -> list[str]:
+    """チェックボックス送信で選ばれた対象指数を取り出す。同名パラメータの複数指定は
+    Function URL(ペイロード形式2.0)のqueryStringParametersではカンマ結合されるが、
+    結合のされ方に依存しきらないよう、rawQueryStringがあればそちらを優先して読む。"""
+    raw = event.get("rawQueryString") or ""
+    values = urllib.parse.parse_qs(raw).get("universe", []) if raw else []
+    if not values:
+        values = [(event.get("queryStringParameters") or {}).get("universe") or ""]
+    return [p for v in values for p in v.split(",") if p.strip().upper() in UNIVERSES]
+
+
+def _universe_checkboxes(selected: list[str], lang: str) -> str:
+    key = "label_en" if lang == LANG_EN else "label"
+    return "".join(
+        f'<label style="display:block;padding:6px 0;font-size:16px;">'
+        f'<input type="checkbox" name="universe" value="{k}"{" checked" if k in selected else ""}'
+        f' style="width:18px;height:18px;vertical-align:middle;"> {p[key]}</label>'
+        for k, p in UNIVERSES.items()
+    )
 
 
 def _trigger_report(report: str, owner_token: str):
@@ -777,7 +804,7 @@ def _render_about(lang: str = LANG_JA) -> str:
     <h3>運営者情報</h3>
     <p>「PegSignal（株式レポートサービス）」は、<strong>個人が開発・運営しているサービス</strong>
     です。法人ではなく、企画・開発・運用のすべてを個人で行っています。</p>
-    <p>NASDAQ100またはS&amp;P500構成銘柄（選択制）からPEGレシオが低い成長株を選定し、
+    <p>NASDAQ100またはS&amp;P500構成銘柄（選択制・両方も可）からPEGレシオが低い成長株を選定し、
     シグナルをメール配信する
     無料サービスです。判定ロジックの詳細は<a href="?info=1">この仕組みについて</a>を
     ご覧ください。</p>
@@ -853,8 +880,7 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
     watchlist = _current_watchlist(token)
     mode = get_period_mode(token)
     preset = get_preset(mode)
-    universe = get_universe(token)
-    universe_preset = UNIVERSES[universe]
+    universes = get_universes(token)
 
     if lang == LANG_EN:
         delete_label = "delete"
@@ -874,10 +900,6 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
             for k in PERIOD_PRESETS
         )
         preset_en = PERIOD_PRESETS[mode]
-        universe_options = "".join(
-            f'<option value="{k}"{" selected" if k == universe else ""}>{p["label_en"]}</option>'
-            for k, p in UNIVERSES.items()
-        )
         notice_html = f'<p class="notice">{notice}</p>' if notice else ""
         lang_switch = (
             f'<p class="muted"><a href="?token={t}&lang=ja">日本語で表示</a></p>'
@@ -907,13 +929,15 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
         <h3>Index universe</h3>
         <form method="GET">
           <input type="hidden" name="token" value="{t}">
-          <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
-          <button type="submit" style="padding:8px 16px;">Change</button>
+          <input type="hidden" name="universe_set" value="1">
+          {_universe_checkboxes(universes, lang)}
+          <button type="submit" style="padding:8px 16px;margin-top:6px;">Change</button>
         </form>
         <p style="color:#888;font-size:12px;">
-          Current: <strong>{universe_preset['label_en']}</strong> — this only changes which index the
+          Current: <strong>{universes_label(universes, lang_en=True)}</strong> — tick both to get
+          each index's ranking in the same email. This only changes which index the
           <strong>selection report</strong> ranks. Your watchlist is unaffected: you can track any
-          stock from either index, whichever you pick here.</p>
+          stock from either index, whatever you tick here.</p>
 
         <hr style="margin:24px 0;">
         <h3>Send a report now</h3>
@@ -945,10 +969,6 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
         f'<option value="{k}"{" selected" if k == mode else ""}>{p["label"]}</option>'
         for k, p in PERIOD_PRESETS.items()
     )
-    universe_options = "".join(
-        f'<option value="{k}"{" selected" if k == universe else ""}>{p["label"]}</option>'
-        for k, p in UNIVERSES.items()
-    )
 
     notice_html = f'<p style="background:#eef;padding:8px;border-radius:4px;">{notice}</p>' if notice else ""
 
@@ -976,13 +996,15 @@ def _render_form(token: str, lang: str = LANG_JA, notice: str = "") -> str:
     <h3>対象指数</h3>
     <form method="GET">
       <input type="hidden" name="token" value="{t}">
-      <select name="universe" style="padding:8px;font-size:16px;">{universe_options}</select>
-      <button type="submit" style="padding:8px 16px;">変更</button>
+      <input type="hidden" name="universe_set" value="1">
+      {_universe_checkboxes(universes, lang)}
+      <button type="submit" style="padding:8px 16px;margin-top:6px;">変更</button>
     </form>
     <p style="color:#888;font-size:12px;">
-      現在: <strong>{universe_preset['label']}</strong> — ここで変わるのは
+      現在: <strong>{universes_label(universes)}</strong> — 両方にチェックを入れると、
+      1通のメールにそれぞれの指数のランキングが載ります。ここで変わるのは
       <strong>選定レポート</strong>がどの指数からランキングするかだけです。
-      監視リストには影響しません（どちらを選んでも、両方の指数の銘柄を登録・監視できます）。</p>
+      監視リストには影響しません（どれを選んでも、両方の指数の銘柄を登録・監視できます）。</p>
 
     <hr style="margin:24px 0;">
     <h3>レポートを今すぐ送信</h3>
@@ -1071,12 +1093,12 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
     # 特定の指数を断定するとNASDAQ100専用サービスだと誤解されるため、
     # 登録済み(トークンあり)かどうかで書き分ける
     if token:
-        universe_preset = UNIVERSES[get_universe(token)]
+        universes = get_universes(token)
         universe_note = (
-            f"<strong>{universe_preset['label_en']}</strong> constituents "
+            f"<strong>{universes_label(universes, lang_en=True)}</strong> constituents "
             f'(you can change this under "Index universe" on the main screen)'
             if lang == LANG_EN else
-            f"<strong>{universe_preset['label']}</strong>構成銘柄"
+            f"<strong>{universes_label(universes)}</strong>構成銘柄"
             f"（メイン画面の「対象指数」から変更できます）"
         )
     else:
@@ -1084,10 +1106,10 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
         labels_ja = "または".join(p["label"] for p in UNIVERSES.values())
         universe_note = (
             f"<strong>{labels}</strong> constituents "
-            f"(you choose which one after signing up, and can switch anytime)"
+            f"(you choose one or both after signing up, and can switch anytime)"
             if lang == LANG_EN else
             f"<strong>{labels_ja}</strong>構成銘柄"
-            f"（登録後にどちらかを選べます。いつでも切替可能）"
+            f"（登録後に片方または両方を選べます。いつでも切替可能）"
         )
 
     if lang == LANG_EN:
@@ -1407,8 +1429,9 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
           energy. A wider net, so you'll see names that never appear in the NASDAQ100 list.</p>
         </div>
         <p class="muted">This setting only changes which index the <strong>selection
-        report</strong> ranks. Your watchlist is unaffected — you can track stocks from either
-        index no matter which one you pick here.</p>
+        report</strong> ranks, and you can tick both to get both rankings in one email. Your
+        watchlist is unaffected — you can track stocks from either index no matter what you
+        tick here.</p>
 
         <h4>7. A typical week</h4>
         <div class="guide-card">
@@ -1454,7 +1477,7 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p class="fig-cap">メールアドレスを登録し、気になる銘柄を選ぶだけ。
     あとは自動でレポートが届きます。</p>
     <p>PegSignalは、米国NASDAQ市場の代表的な100社（「NASDAQ100」。Apple・Microsoft・
-    NVIDIAなど）、またはより広い「S&amp;P500」（メイン画面からいつでも切替可能）の中から、
+    NVIDIAなど）、またはより広い「S&amp;P500」（メイン画面からいつでも切替可能。両方を同時に選ぶこともできます）の中から、
     <strong>PEGレシオ(株価に対する成長の速さ)が低い銘柄</strong>を
     自動でランキングしてメールでお知らせします。さらに、あなたが選んだ銘柄については
     値動きを見張って、変化があればお知らせします。</p>
@@ -1515,8 +1538,9 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
       NASDAQ100のランキングには決して出てこない銘柄も見られます。</p>
     </div>
     <p class="muted">この設定で変わるのは<strong>選定レポート</strong>がどの指数から
-    ランキングするかだけです。監視リストには影響しません（どちらを選んでも、両方の指数の
-    銘柄を登録・監視できます）。</p>
+    ランキングするかだけです。両方にチェックを入れると、1通のメールに両方のランキングが
+    載ります。監視リストには影響しません（どれを選んでも、両方の指数の銘柄を登録・監視
+    できます）。</p>
 
     <h4>7. 使い方の流れ（例）</h4>
     <div class="guide-card">
@@ -1815,7 +1839,7 @@ def _classify_route(params: dict) -> str:
         return "delete_account"
     if params.get("mode"):
         return "mode_change"
-    if params.get("universe"):
+    if params.get("universe") or params.get("universe_set"):
         return "universe_change"
     if params.get("report") in ("selection", "monitoring"):
         return f"report_{params['report']}"
@@ -1972,12 +1996,21 @@ def handler(event, context):
 
     # 対象指数(ユニバース)の変更。期間モードと全く同じ仕組み(app_settings +
     # プリセット辞書)で実装している(S&P500対応、2026-08-07)
-    if params.get("universe"):
-        universe = set_universe(token, params["universe"])
-        preset = UNIVERSES[universe]
-        notice = (f'Universe changed to "{preset["label_en"]}". This applies from the next report.'
+    # (2026-11-25)プルダウンからチェックボックスに変え、複数の指数を同時に選べるように
+    # した。チェックを全部外して送信するとuniverseパラメータ自体が来ないため、
+    # フォームに仕込んだuniverse_setで「送信された」ことを検知し、設定は変えずに
+    # 1つ以上選ぶよう案内する(黙って既定のNASDAQ100に戻すと意図しない変更になるため)
+    if params.get("universe") or params.get("universe_set"):
+        requested = _requested_universes(event)
+        if not requested:
+            notice = ("Please tick at least one index. Your setting was not changed." if lang == LANG_EN
+                      else "対象指数は1つ以上選んでください。設定は変更していません。")
+            return _page(_render_form(token, lang, notice=notice), lang=lang)
+        universes = set_universes(token, requested)
+        notice = (f'Universe changed to "{universes_label(universes, lang_en=True)}". '
+                  f"This applies from the next report."
                   if lang == LANG_EN
-                  else f"対象指数を「{preset['label']}」に変更しました。次回のレポートから反映されます。")
+                  else f"対象指数を「{universes_label(universes)}」に変更しました。次回のレポートから反映されます。")
         return _page(_render_form(token, lang, notice=notice), lang=lang)
 
     # レポートの即時送信(非同期起動)
