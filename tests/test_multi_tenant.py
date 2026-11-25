@@ -14,7 +14,7 @@ def test_selection_reports_scan_once_per_distinct_mode(monkeypatch):
     users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com"), _user("tok-c", "c@example.com")]
     modes = {"tok-a": "SHORT", "tok-b": "SHORT", "tok-c": "LONG"}
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: modes[token])
-    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: ["NASDAQ100"])
 
     scan_calls = []
     def fake_scan(mode, universe):
@@ -38,7 +38,7 @@ def test_selection_reports_scan_once_per_distinct_mode_and_universe(monkeypatch)
     users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com")]
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "SHORT")
     universes = {"tok-a": "NASDAQ100", "tok-b": "SP500"}
-    monkeypatch.setattr(handler, "get_user_universe", lambda token: universes[token])
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: [universes[token]])
 
     scan_calls = []
     def fake_scan(mode, universe):
@@ -56,7 +56,7 @@ def test_selection_reports_scan_once_per_distinct_mode_and_universe(monkeypatch)
 def test_selection_report_links_use_each_users_own_token(monkeypatch):
     users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com")]
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "SHORT")
-    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: ["NASDAQ100"])
     monkeypatch.setattr(handler, "_scan_universe", lambda mode, universe: ([], {}))
 
     used_tokens = []
@@ -172,7 +172,7 @@ def test_send_monitoring_report_now_fetches_and_caches_when_no_snapshot(monkeypa
 def test_send_selection_report_now_uses_cached_snapshot_without_scanning(monkeypatch):
     """レポート即時発行ボタンは、保存済みスナップショットがあれば新規スキャンしない。"""
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
-    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: ["NASDAQ100"])
     monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode, universe: {
         "ranked": [{"ticker": "NVDA"}], "signals_map": {"NVDA": {}}, "as_of_date": "2026-08-01",
     })
@@ -198,7 +198,7 @@ def test_send_selection_report_now_uses_cached_snapshot_without_scanning(monkeyp
 def test_send_selection_report_now_scans_when_no_snapshot(monkeypatch):
     """そのモードで一度もバッチが走っていない場合のみ、その場で1回スキャンする。"""
     monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
-    monkeypatch.setattr(handler, "get_user_universe", lambda token: "NASDAQ100")
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: ["NASDAQ100"])
     monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode, universe: None)
 
     scan_calls = []
@@ -252,3 +252,63 @@ def test_dispatch_monitoring_only_without_owner_token_falls_back_to_bulk_run(mon
     handler.handler({"monitoring_only": True}, None)
 
     assert sorted(u["token"] for u in received) == ["tok-a", "tok-b"]
+
+
+def test_user_with_both_universes_gets_one_email_and_scans_are_shared(monkeypatch):
+    """対象指数を両方選んだ利用者(2026-11-25、チェックボックス化)には1通にまとめて送る。
+    片方だけ選んでいる利用者と同じ(モード,ユニバース)のスキャンは使い回し、二重に走らせない"""
+    users = [_user("tok-a", "a@example.com"), _user("tok-b", "b@example.com")]
+    monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
+    universes = {"tok-a": ["NASDAQ100"], "tok-b": ["NASDAQ100", "SP500"]}
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: universes[token])
+
+    scan_calls = []
+    def fake_scan(mode, universe):
+        scan_calls.append((mode, universe))
+        return ([{"ticker": universe}], {})
+    monkeypatch.setattr(handler, "_scan_universe", fake_scan)
+
+    single_calls, multi_calls = [], []
+    def fake_single(ranked, signals_map, url, token, mode, lang="ja", as_of=None, universe=""):
+        single_calls.append((token, universe))
+        return "single"
+    def fake_multi(sections, url, token, mode, lang="ja"):
+        multi_calls.append((token, [(s["universe"], s["ranked"]) for s in sections]))
+        return "multi"
+    monkeypatch.setattr(handler, "build_selection_report", fake_single)
+    monkeypatch.setattr(handler, "build_selection_report_multi", fake_multi)
+    sent = []
+    monkeypatch.setattr(handler, "send_email", lambda subject, body, to: sent.append((to, body)))
+
+    handler.run_selection_reports(users)
+
+    assert sorted(scan_calls) == [("MID", "NASDAQ100"), ("MID", "SP500")]
+    assert single_calls == [("tok-a", "NASDAQ100")]
+    assert multi_calls == [("tok-b", [("NASDAQ100", [{"ticker": "NASDAQ100"}]),
+                                      ("SP500", [{"ticker": "SP500"}])])]
+    assert sorted(sent) == [("a@example.com", "single"), ("b@example.com", "multi")]
+
+
+def test_send_now_with_both_universes_reads_each_snapshot(monkeypatch):
+    """即時発行ボタンも、選んでいる指数それぞれの保存済みスナップショットを読むだけ"""
+    monkeypatch.setattr(handler, "get_user_period_mode", lambda token: "MID")
+    monkeypatch.setattr(handler, "get_user_universes", lambda token: ["NASDAQ100", "SP500"])
+    monkeypatch.setattr(handler, "get_selection_snapshot", lambda mode, universe: {
+        "ranked": [{"ticker": universe}], "signals_map": {}, "as_of_date": f"as-of-{universe}",
+    })
+    def fail_if_called(mode, universe):
+        raise AssertionError("キャッシュがあるのに_scan_universeが呼ばれた")
+    monkeypatch.setattr(handler, "_scan_universe", fail_if_called)
+
+    captured = {}
+    def fake_multi(sections, url, token, mode, lang="ja"):
+        captured["sections"] = [(s["universe"], s["as_of"]) for s in sections]
+        return "multi"
+    monkeypatch.setattr(handler, "build_selection_report_multi", fake_multi)
+    sent = []
+    monkeypatch.setattr(handler, "send_email", lambda subject, body, to: sent.append(body))
+
+    handler.send_selection_report_now(_user("tok-a", "a@example.com"))
+
+    assert captured["sections"] == [("NASDAQ100", "as-of-NASDAQ100"), ("SP500", "as-of-SP500")]
+    assert sent == ["multi"]

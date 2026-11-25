@@ -26,6 +26,7 @@ from config import (
     get_preset,
     normalize_mode,
     normalize_universe,
+    normalize_universes,
     selection_snapshot_key,
     signal_history_date_key,
     universe_cache_key,
@@ -36,7 +37,7 @@ from data_sources import get_nasdaq100_tickers, get_sp500_tickers, get_stock_dat
 from mailer import ResendMailer
 from signals import calc_all_signals
 from ranking import rank_stocks
-from report import build_selection_report, build_monitoring_report, build_weekly_tweet_text, selection_subject
+from report import build_selection_report, build_selection_report_multi, build_monitoring_report, build_weekly_tweet_text, selection_subject
 from social import XPoster
 
 WATCHLIST_TABLE = os.environ.get("WATCHLIST_TABLE", "watchlist")
@@ -98,17 +99,17 @@ def get_user_period_mode(owner_token: str) -> str:
         return DEFAULT_PERIOD_MODE
 
 
-def get_user_universe(owner_token: str) -> str:
-    """利用者が画面で選んだ対象指数(ユニバース)を読む。未設定・取得失敗時は既定
-    (NASDAQ100)で動かす(設定が読めないだけでレポート全体を止める必要はないため、
-    get_user_period_modeと同じ方針)。"""
+def get_user_universes(owner_token: str) -> list[str]:
+    """利用者が画面で選んだ対象指数(ユニバース、複数可)を読む。未設定・取得失敗時は
+    既定(NASDAQ100のみ)で動かす(設定が読めないだけでレポート全体を止める必要は
+    ないため、get_user_period_modeと同じ方針)。"""
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
         resp = table.get_item(Key={"key": user_universe_key(owner_token)})
-        return normalize_universe(resp.get("Item", {}).get("value"))
+        return normalize_universes(resp.get("Item", {}).get("value"))
     except Exception as e:
         print(f"[WARN] ユニバースの取得に失敗、既定値({DEFAULT_UNIVERSE})を使用: {e}")
-        return DEFAULT_UNIVERSE
+        return [DEFAULT_UNIVERSE]
 
 
 def get_cached_tickers(universe: str = DEFAULT_UNIVERSE) -> list[str] | None:
@@ -287,21 +288,40 @@ def _scan_universe(mode: str, universe: str = DEFAULT_UNIVERSE) -> tuple[list, d
 
 def run_selection_reports(users: list[dict]):
     """usersに含まれる利用者全員へ選定レポートを送る(定時実行用)。(モード,ユニバース)の
-    組み合わせごとに1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。"""
-    by_key: dict[tuple[str, str], list[dict]] = {}
+    組み合わせごとに1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。
+    対象指数を複数選んでいる利用者には、指数ごとのランキングを1通にまとめて送る
+    (2026-11-25)。スキャンは(モード,ユニバース)単位で使い回すので、両方選んだ利用者が
+    いても同じ組み合わせを二重にスキャンすることはない。"""
+    by_key: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
     for u in users:
         mode = get_user_period_mode(u["token"])
-        universe = get_user_universe(u["token"])
-        by_key.setdefault((mode, universe), []).append(u)
+        universes = tuple(get_user_universes(u["token"]))
+        by_key.setdefault((mode, universes), []).append(u)
 
-    for (mode, universe), group in by_key.items():
-        ranked, signals_map = _scan_universe(mode, universe)
+    scans: dict[tuple[str, str], tuple[list, dict]] = {}
+    for (mode, universes), group in by_key.items():
+        for universe in universes:
+            if (mode, universe) not in scans:
+                scans[(mode, universe)] = _scan_universe(mode, universe)
         for u in group:
             lang = u.get("lang") or "ja"
-            body = build_selection_report(ranked, signals_map, REGISTER_URL, u["token"], mode,
-                                          lang=lang, as_of=_today_str(), universe=universe)
+            body = _selection_body(
+                [(universe, *scans[(mode, universe)], _today_str()) for universe in universes],
+                u["token"], mode, lang)
             subject = selection_subject(mode, lang)
             send_email(subject, body, u["email"])
+
+
+def _selection_body(results: list[tuple], token: str, mode: str, lang: str) -> str:
+    """resultsは(universe, ranked, signals_map, as_of)のリスト。対象指数が1つなら
+    従来どおりの本文、複数なら指数ごとのセクションを並べた本文を返す。"""
+    if len(results) == 1:
+        universe, ranked, signals_map, as_of = results[0]
+        return build_selection_report(ranked, signals_map, REGISTER_URL, token, mode,
+                                      lang=lang, as_of=as_of, universe=universe)
+    sections = [{"universe": universe, "ranked": ranked, "signals_map": signals_map, "as_of": as_of}
+                for universe, ranked, signals_map, as_of in results]
+    return build_selection_report_multi(sections, REGISTER_URL, token, mode, lang=lang)
 
 
 def send_selection_report_now(user: dict):
@@ -309,18 +329,19 @@ def send_selection_report_now(user: dict):
     新規スキャンは行わない(その(モード,ユニバース)で一度もバッチが走っていない場合のみ、
     その場で1回スキャンする)。"""
     mode = get_user_period_mode(user["token"])
-    universe = get_user_universe(user["token"])
-    snapshot = get_selection_snapshot(mode, universe)
-    if snapshot is None:
-        ranked, signals_map = _scan_universe(mode, universe)  # 内部でスナップショットも保存される
-        as_of = _today_str()
-    else:
-        ranked, signals_map = snapshot["ranked"], snapshot["signals_map"]
-        as_of = snapshot["as_of_date"]
+    results = []
+    for universe in get_user_universes(user["token"]):
+        snapshot = get_selection_snapshot(mode, universe)
+        if snapshot is None:
+            ranked, signals_map = _scan_universe(mode, universe)  # 内部でスナップショットも保存される
+            as_of = _today_str()
+        else:
+            ranked, signals_map = snapshot["ranked"], snapshot["signals_map"]
+            as_of = snapshot["as_of_date"]
+        results.append((universe, ranked, signals_map, as_of))
 
     lang = user.get("lang") or "ja"
-    body = build_selection_report(ranked, signals_map, REGISTER_URL, user["token"], mode, lang=lang,
-                                  as_of=as_of, universe=universe)
+    body = _selection_body(results, user["token"], mode, lang)
     subject = selection_subject(mode, lang)
     send_email(subject, body, user["email"])
 

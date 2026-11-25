@@ -143,6 +143,33 @@ def normalize_universe(universe: str | None) -> str:
     return u if u in UNIVERSES else DEFAULT_UNIVERSE
 
 
+def normalize_universes(value) -> list[str]:
+    """利用者が選んだ対象指数(複数可)を、UNIVERSESの定義順のリストに正規化する
+    (2026-11-25、チェックボックスで複数選択できるようにした際に新設)。
+    app_settingsにはカンマ区切りの文字列("NASDAQ100,SP500")で保存するため、
+    文字列・リストのどちらも受け付ける。単一選択だった時期の値("SP500")は
+    そのまま1件のリストとして読める(後方互換)。未知の値は捨て、1件も残らなければ
+    既定ユニバースのみとする(normalize_universeと同じフォールバック方針)。"""
+    if isinstance(value, str):
+        parts = value.split(",")
+    else:
+        parts = list(value or [])
+    chosen = {str(p).strip().upper() for p in parts}
+    return [k for k in UNIVERSES if k in chosen] or [DEFAULT_UNIVERSE]
+
+
+def universes_to_value(universes) -> str:
+    """normalize_universesの逆。app_settingsへ保存する文字列にする"""
+    return ",".join(normalize_universes(universes))
+
+
+def universes_label(universes, lang_en: bool = False) -> str:
+    """選択中の対象指数を画面・通知文に出すための連結ラベル(例:「NASDAQ100・S&P500」)"""
+    key = "label_en" if lang_en else "label"
+    sep = " + " if lang_en else "・"
+    return sep.join(UNIVERSES[u][key] for u in normalize_universes(universes))
+
+
 def get_universe_preset(universe: str | None) -> dict:
     """ユニバース名からプリセットを返す。未知の値は既定ユニバースにフォールバックする"""
     return UNIVERSES.get((universe or "").upper(), UNIVERSES[DEFAULT_UNIVERSE])
@@ -155,7 +182,8 @@ def universe_cache_key(universe: str | None) -> str:
 
 def user_universe_key(owner_token: str) -> str:
     """app_settingsテーブルで利用者ごとのユニバース選択を保存する際のキー
-    (user_period_mode_keyと同じ仕組み)。"""
+    (user_period_mode_keyと同じ仕組み)。値は複数選択に対応したカンマ区切り文字列で、
+    読むときはnormalize_universesを通す。"""
     return f"{owner_token}#{UNIVERSE_KEY}"
 
 

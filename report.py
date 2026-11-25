@@ -8,6 +8,8 @@ lang="ja"(既定)なら従来通り日本語、lang="en"なら英語版を生成
 テンプレートを共有せず素直にja/enを別々に書いているが、単純な文言の
 出し分け(見出し・ラベル・凡例等)はすべて下のT辞書 + t()に集約している。
 """
+import html
+
 from config import PERIOD_PRESETS, get_universe_preset
 
 LANG_JA = "ja"
@@ -387,6 +389,41 @@ def build_selection_report(ranked: list[dict], signals_map: dict, register_base_
       {_guide_link(register_base_url, lang)}
       <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {_as_of_note(as_of, lang)}
+      {_unsubscribe_link(register_base_url, register_token, lang)}
+    </body></html>
+    """
+
+
+def build_selection_report_multi(sections: list[dict], register_base_url: str,
+                                 register_token: str, mode: str = "", lang: str = LANG_JA) -> str:
+    """対象指数を複数選んでいる利用者向けの選定レポート(2026-11-25)。指数ごとの
+    ランキングを1通のメールに並べる(配信頻度は期間モードで決まり指数間で共通のため、
+    指数の数だけメールを分けるより1通にまとめる)。
+    sectionsの各要素は {"universe", "ranked", "signals_map", "as_of"}。as_ofは
+    スナップショットの日付が指数ごとに異なりうるため、指数ごとに表示する。
+    対象指数が1つだけの利用者には従来どおりbuild_selection_reportを使う。"""
+    register_form_url = f"{register_base_url}?token={register_token}"
+    blocks = []
+    for sec in sections:
+        preset = get_universe_preset(sec["universe"])
+        label = preset["label_en"] if lang == LANG_EN else preset["label"]
+        heading = f"Universe: {label}" if lang == LANG_EN else f"対象指数: {label}"
+        cards = render_selection_cards(sec["ranked"], sec["signals_map"], register_base_url,
+                                       lang, register_token)
+        blocks.append(
+            f'<h3 style="border-top:2px solid #ddd;padding-top:14px;margin-top:22px;">'
+            f'{html.escape(heading)}</h3>'
+            f'{cards}{_as_of_note(sec.get("as_of"), lang)}'
+        )
+
+    return f"""
+    <html><body style="font-family:sans-serif;max-width:480px;margin:0 auto;">
+      <h2>{selection_subject(mode, lang)}</h2>
+      {_mode_note(mode, lang)}
+      {"".join(blocks)}
+      <p><a href="{register_form_url}">{t('other_ticker_link', lang)}</a></p>
+      {_guide_link(register_base_url, lang)}
+      <p style="color:#888;font-size:12px;">{t('disclaimer', lang)}</p>
       {_unsubscribe_link(register_base_url, register_token, lang)}
     </body></html>
     """
