@@ -131,8 +131,14 @@ def get_cached_tickers(universe: str = DEFAULT_UNIVERSE) -> list[str] | None:
         return None
 
 
+def _estimate_from_cache(v) -> dict | None:
+    if not isinstance(v, dict):
+        return None
+    return {k: (None if x is None else float(x)) for k, x in v.items()}
+
+
 def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
-    """来期の予想EPS成長率を {ticker: 成長率 or None} で返す。2つ目の戻り値は取得に
+    """今期・来期の予想EPS成長率を {ticker: {"current_year", "next_year"} or None} で返す。2つ目の戻り値は取得に
     失敗した(通信エラー等)銘柄数。
     アナリスト予想は判定期間モード・対象指数に依存しないので、app_settingsに当日分を
     1件だけキャッシュし、同じ日の全スキャン(全モード・全指数・監視レポート)で共有する。
@@ -144,7 +150,7 @@ def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
     try:
         item = table.get_item(Key={"key": GROWTH_CACHE_KEY}).get("Item") or {}
         if item.get("as_of_date") == today:
-            cached = {k: (None if v is None else float(v)) for k, v in dict(item.get("values") or {}).items()}
+            cached = {k: _estimate_from_cache(v) for k, v in dict(item.get("values") or {}).items()}
     except Exception as e:
         print(f"[WARN] 成長率キャッシュの取得に失敗: {e}")
 

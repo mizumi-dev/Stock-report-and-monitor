@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 
 from config import (
     MAX_PEG,
+    MIN_CURRENT_YEAR_GROWTH,
     MIN_GROWTH,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
@@ -1141,11 +1142,13 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
         <details open>
           <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
           <p>Universe: {universe_note}. Only stocks
-          meeting both conditions below become candidates, and the top ones are sent ranked by
+          meeting all conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
           <ul>
             <li>Analysts' expected EPS growth for next fiscal year at or above {MIN_GROWTH * 100:.0f}%</li>
             <li>PEG ratio greater than 0 and at or below {MAX_PEG}</li>
+            <li>Not recovering from a one-off dip: this fiscal year's expected EPS growth is
+            {MIN_CURRENT_YEAR_GROWTH * 100:.0f}% or better, and trailing 12-month EPS is positive</li>
           </ul>
           <p class="muted">Forward P/E, expected EPS growth (analyst consensus), market cap, and
           price all come from <strong>Yahoo Finance (the yfinance library)</strong>. We calculate
@@ -1211,11 +1214,13 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
     <details open>
       <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
-      <p>対象: {universe_note}。次の条件を両方満たす
+      <p>対象: {universe_note}。次の条件をすべて満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
         <li>来期の予想EPS成長率（アナリスト予想の平均）が {MIN_GROWTH * 100:.0f}% 以上</li>
         <li>PEGレシオが 0 より大きく {MAX_PEG} 以下</li>
+        <li>一時的な落ち込みからの反動でないこと（今期の予想EPS成長率が{MIN_CURRENT_YEAR_GROWTH * 100:.0f}%以上、
+        かつ過去12か月の実績EPSが黒字）</li>
       </ul>
       <p class="muted">予想PER・予想EPS成長率（アナリスト予想の平均）・時価総額・株価は
       <strong>Yahoo Finance（yfinanceライブラリ）</strong>から取得。PEGは当サービスで

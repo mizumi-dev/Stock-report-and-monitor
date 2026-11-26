@@ -5,6 +5,7 @@
 - yfinanceで個別銘柄データを取得
 """
 import json
+import math
 import re
 import urllib.request
 import yfinance as yf
@@ -114,6 +115,7 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
             "ticker": ticker,
             "history": hist,
             "forward_pe": info.get("forwardPE"),
+            "trailing_eps": info.get("trailingEps"),
             "peg": None,
             "earnings_growth": None,
             "market_cap": info.get("marketCap"),
@@ -126,19 +128,25 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
         return {"ticker": ticker, "history": None, "error": str(e)}
 
 
-def get_growth_estimate(ticker: str) -> float | None:
-    """来期(+1y)の予想EPS成長率(アナリストのコンセンサス、0.2=+20%)を返す。
-    予想が無い銘柄はNone。通信エラー等の取得失敗は例外を送出する(呼び出し側で
-    「予想が無い」と「取れなかった」を区別し、取れなかった分はキャッシュしないため)。"""
-    ge = yf.Ticker(ticker).growth_estimates
-    if ge is None or getattr(ge, "empty", True) or "+1y" not in ge.index or "stockTrend" not in ge.columns:
-        return None
-    value = ge.loc["+1y", "stockTrend"]
+def _as_finite_float(value) -> float | None:
     try:
         value = float(value)
     except (TypeError, ValueError):
         return None
-    return None if value != value else value  # NaN → None
+    return value if math.isfinite(value) else None
+
+
+def get_growth_estimate(ticker: str) -> dict | None:
+    """今期(0y)・来期(+1y)の予想EPS成長率(アナリストのコンセンサス、0.2=+20%)を
+    {"current_year": ..., "next_year": ...} で返す。予想表自体が無い銘柄はNone、
+    片方だけ無い場合はその値がNone。通信エラー等の取得失敗は例外を送出する(呼び出し側で
+    「予想が無い」と「取れなかった」を区別し、取れなかった分はキャッシュしないため)。"""
+    ge = yf.Ticker(ticker).growth_estimates
+    if ge is None or getattr(ge, "empty", True) or "stockTrend" not in ge.columns:
+        return None
+    def pick(period):
+        return _as_finite_float(ge.loc[period, "stockTrend"]) if period in ge.index else None
+    return {"current_year": pick("0y"), "next_year": pick("+1y")}
 
 
 def forward_peg(forward_pe, growth) -> float | None:
@@ -155,8 +163,10 @@ def forward_peg(forward_pe, growth) -> float | None:
     return forward_pe / (growth * 100)
 
 
-def apply_forward_peg(stock: dict, growth: float | None) -> dict:
-    """get_stock_dataの結果に、来期の予想EPS成長率とそれを使ったPEGを埋める"""
-    stock["earnings_growth"] = growth
-    stock["peg"] = forward_peg(stock.get("forward_pe"), growth)
+def apply_forward_peg(stock: dict, estimate: dict | None) -> dict:
+    """get_stock_dataの結果に、来期・今期の予想EPS成長率と、来期の成長率を使ったPEGを埋める"""
+    estimate = estimate or {}
+    stock["earnings_growth"] = estimate.get("next_year")
+    stock["current_year_growth"] = estimate.get("current_year")
+    stock["peg"] = forward_peg(stock.get("forward_pe"), stock["earnings_growth"])
     return stock

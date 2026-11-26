@@ -29,17 +29,19 @@ class TestForwardPeg:
         assert data_sources.forward_peg(-5.0, 0.3) is None  # 赤字予想
 
     def test_apply_sets_growth_and_peg(self):
-        s = data_sources.apply_forward_peg({"forward_pe": 9.0}, 0.72)
-        assert s["earnings_growth"] == 0.72
+        s = data_sources.apply_forward_peg({"forward_pe": 9.0}, {"current_year": 1.03, "next_year": 0.72})
+        assert s["earnings_growth"] == 0.72 and s["current_year_growth"] == 1.03
         assert s["peg"] == pytest.approx(0.125)
 
     def test_twlo_like_case_is_now_excluded_by_gate(self):
         """一時的な利益で直近四半期が+335%でも、来期予想が+11%なら足切りで落ちる"""
-        s = data_sources.apply_forward_peg({"forward_pe": 26.4}, 0.111)
+        s = data_sources.apply_forward_peg({"forward_pe": 26.4, "trailing_eps": 7.96, "growth_basis": "forward_1y"},
+                                           {"current_year": 0.26, "next_year": 0.111})
         assert passes_gate(s) is False
 
     def test_high_growth_reasonable_pe_passes_gate(self):
-        s = data_sources.apply_forward_peg({"forward_pe": 9.0}, 0.72)  # NVDA相当
+        s = data_sources.apply_forward_peg({"forward_pe": 9.0, "trailing_eps": 4.0, "growth_basis": "forward_1y"},
+                                           {"current_year": 1.03, "next_year": 0.72})  # NVDA相当
         assert passes_gate(s) is True
 
 
@@ -52,12 +54,13 @@ class TestGetGrowthEstimate:
     def test_reads_next_year_stock_trend(self, monkeypatch):
         df = pd.DataFrame({"stockTrend": [0.26, 0.11], "indexTrend": [0.3, 0.2]}, index=["0y", "+1y"])
         monkeypatch.setattr(data_sources.yf, "Ticker", lambda t: self._ticker(df))
-        assert data_sources.get_growth_estimate("TWLO") == pytest.approx(0.11)
+        assert data_sources.get_growth_estimate("TWLO") == {"current_year": pytest.approx(0.26),
+                                                            "next_year": pytest.approx(0.11)}
 
     def test_none_when_no_estimate(self, monkeypatch):
         df = pd.DataFrame({"stockTrend": [float("nan")]}, index=["+1y"])
         monkeypatch.setattr(data_sources.yf, "Ticker", lambda t: self._ticker(df))
-        assert data_sources.get_growth_estimate("X") is None
+        assert data_sources.get_growth_estimate("X") == {"current_year": None, "next_year": None}
         monkeypatch.setattr(data_sources.yf, "Ticker", lambda t: self._ticker(None))
         assert data_sources.get_growth_estimate("X") is None
 
@@ -75,24 +78,25 @@ class TestGrowthCache:
         calls = []
         def fake(t):
             calls.append(t)
-            return {"AAA": 0.3, "BBB": None}[t]
+            return {"AAA": {"current_year": 0.1, "next_year": 0.3}, "BBB": None}[t]
         monkeypatch.setattr(handler, "get_growth_estimate", fake)
 
         first, failed = handler.get_growth_estimates(["AAA", "BBB"])
-        assert first == {"AAA": 0.3, "BBB": None} and failed == 0
+        assert first == {"AAA": {"current_year": 0.1, "next_year": 0.3}, "BBB": None} and failed == 0
         # 2回目(別モード・別指数のスキャン)は問い合わせない。「予想なし」(None)もキャッシュ済み
         second, _ = handler.get_growth_estimates(["BBB", "AAA"])
-        assert second == {"AAA": 0.3, "BBB": None}
+        assert second == {"AAA": {"current_year": 0.1, "next_year": 0.3}, "BBB": None}
         assert sorted(calls) == ["AAA", "BBB"]
 
     def test_only_missing_tickers_are_fetched(self, settings, monkeypatch):
-        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: 0.25)
+        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: {"current_year": 0.0, "next_year": 0.25})
         handler.get_growth_estimates(["AAA"])
         calls = []
-        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: calls.append(t) or 0.4)
+        monkeypatch.setattr(handler, "get_growth_estimate",
+                            lambda t: calls.append(t) or {"current_year": 0.0, "next_year": 0.4})
         result, _ = handler.get_growth_estimates(["AAA", "CCC"])
         assert calls == ["CCC"]
-        assert result == {"AAA": 0.25, "CCC": 0.4}
+        assert result["AAA"]["next_year"] == 0.25 and result["CCC"]["next_year"] == 0.4
 
     def test_failed_fetch_is_not_cached_and_counted(self, settings, monkeypatch):
         def boom(t):
@@ -101,22 +105,23 @@ class TestGrowthCache:
         result, failed = handler.get_growth_estimates(["AAA"])
         assert result == {"AAA": None} and failed == 1
         # 次の呼び出しでは取り直す
-        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: 0.5)
+        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: {"current_year": 0.1, "next_year": 0.5})
         result, failed = handler.get_growth_estimates(["AAA"])
-        assert result == {"AAA": 0.5} and failed == 0
+        assert result["AAA"]["next_year"] == 0.5 and failed == 0
 
     def test_yesterdays_cache_is_ignored(self, settings, monkeypatch):
         settings.put_item(Item={"key": handler.GROWTH_CACHE_KEY, "as_of_date": "2000-01-01",
-                                "values": {"AAA": 0.9}})
-        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: 0.2)
+                                "values": {"AAA": {"current_year": 0.0, "next_year": 0.9}}})
+        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: {"current_year": 0.0, "next_year": 0.2})
         result, _ = handler.get_growth_estimates(["AAA"])
-        assert result == {"AAA": 0.2}
+        assert result["AAA"]["next_year"] == 0.2
 
 
 class TestFillForwardPeg:
     def test_skips_estimate_lookup_when_forward_pe_missing(self, settings, monkeypatch):
         calls = []
-        monkeypatch.setattr(handler, "get_growth_estimate", lambda t: calls.append(t) or 0.3)
+        monkeypatch.setattr(handler, "get_growth_estimate",
+                            lambda t: calls.append(t) or {"current_year": 0.1, "next_year": 0.3})
         stocks = [{"ticker": "AAA", "forward_pe": 12.0}, {"ticker": "LOSS", "forward_pe": -3.0},
                   {"ticker": "NONE", "forward_pe": None}]
         requested, failed = handler._fill_forward_peg(stocks)
@@ -130,9 +135,10 @@ class TestScanUniverseUsesForwardPeg:
     def _setup(self, monkeypatch, growth_fn):
         hist = pd.DataFrame({"Close": [1.0] * 10})
         stocks = {
-            "TWLO": {"forward_pe": 26.4},   # 来期+11% → 足切りで落ちる
-            "NVDA": {"forward_pe": 9.0},    # 来期+72% → PEG 0.125
-            "AVGO": {"forward_pe": 15.5},   # 来期+66% → PEG 0.235
+            "TWLO": {"forward_pe": 26.4, "trailing_eps": 7.96},  # 来期+11% → 足切りで落ちる
+            "NVDA": {"forward_pe": 9.0, "trailing_eps": 4.0},    # 来期+72% → PEG 0.125
+            "AVGO": {"forward_pe": 15.5, "trailing_eps": 5.0},   # 来期+66% → PEG 0.235
+            "GILD": {"forward_pe": 17.4, "trailing_eps": 0.5},   # 今期-112%の反動で来期+1121% → 除外
         }
         monkeypatch.setattr(handler, "get_cached_tickers", lambda u: None)
         monkeypatch.setattr(handler, "save_cached_tickers", lambda u, t: None)
@@ -147,8 +153,8 @@ class TestScanUniverseUsesForwardPeg:
         return saved
 
     def test_ranks_by_computed_peg(self, settings, monkeypatch):
-        g = {"TWLO": 0.111, "NVDA": 0.72, "AVGO": 0.66}
-        saved = self._setup(monkeypatch, lambda t: g[t])
+        g = {"TWLO": (0.26, 0.111), "NVDA": (1.03, 0.72), "AVGO": (0.71, 0.66), "GILD": (-1.12, 11.21)}
+        saved = self._setup(monkeypatch, lambda t: {"current_year": g[t][0], "next_year": g[t][1]})
         ranked, _ = handler._scan_universe("MID", "NASDAQ100")
         assert [s["ticker"] for s in ranked] == ["NVDA", "AVGO"]
         assert saved["ranked"][0]["growth_basis"] == handler.GROWTH_BASIS_FORWARD
@@ -174,3 +180,32 @@ def test_test_scan_hook_scans_without_sending(monkeypatch):
     assert calls == [("MID", "SP500")]
     assert body["universe"] == "SP500" and body["scanned"] == 2
     assert body["top"] == [{"ticker": "NVDA", "peg": 0.125, "growth": 0.72}]
+
+
+
+class TestDipExclusion:
+    """今期の一時的な落ち込みからの反動を外すルール(2026-11-26、閾値はユーザー判断で-10%)"""
+    def _stock(self, cur, nxt=0.6, eps=3.0, fpe=10.0):
+        return data_sources.apply_forward_peg(
+            {"forward_pe": fpe, "trailing_eps": eps, "growth_basis": "forward_1y"},
+            {"current_year": cur, "next_year": nxt})
+
+    def test_rebound_after_big_current_year_drop_is_excluded(self):
+        assert passes_gate(self._stock(cur=-1.12, nxt=11.21)) is False  # GILD
+        assert passes_gate(self._stock(cur=-0.40, nxt=1.11)) is False   # CHTR
+
+    def test_small_current_year_dip_within_10_percent_is_kept(self):
+        assert passes_gate(self._stock(cur=-0.01, nxt=0.21)) is True   # META
+        assert passes_gate(self._stock(cur=-0.10)) is True             # ちょうど-10%は残す
+        assert passes_gate(self._stock(cur=-0.11)) is False
+
+    def test_missing_current_year_estimate_is_excluded(self):
+        assert passes_gate(self._stock(cur=None)) is False
+
+    def test_trailing_loss_is_excluded(self):
+        assert passes_gate(self._stock(cur=0.5, eps=-1.2)) is False
+        assert passes_gate(self._stock(cur=0.5, eps=None)) is False
+
+    def test_rules_do_not_apply_to_old_yahoo_peg_rows(self):
+        """growth_basisの無い旧方式の行(テスト・過去データ)には適用しない"""
+        assert passes_gate({"earnings_growth": 0.5, "peg": 1.0}) is True
