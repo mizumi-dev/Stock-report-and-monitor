@@ -6,15 +6,20 @@ on:
 permissions:
   contents: read
 jobs:
-  collect:
+  scan:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/forward-peg-exclusions
+      - uses: actions/checkout@v4
+        with:
+          path: ops
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       # 本番Lambdaのレイヤーと同じyfinanceのバージョンにそろえる
-      - run: pip install "yfinance==1.5.2" pandas
-      - run: python ops_check/collect.py 2>&1 | grep -E "^(ROW|DONE|yfinance)"; exit ${PIPESTATUS[0]}
+      - run: pip install "yfinance==1.5.2" pandas boto3 pytest
+      - run: python ops/ops_check/scan_real.py 2>&1 | grep -E "^RESULT|WARN"; exit ${PIPESTATUS[0]}
         shell: bash
