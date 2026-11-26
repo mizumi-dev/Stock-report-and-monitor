@@ -6,14 +6,15 @@ on:
 permissions:
   contents: read
 jobs:
-  scan:
+  collect:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements-dev.txt
-      - run: python ops_check/scan_check.py 2>&1 | grep -vE "Unauthorized|Invalid Crumb|possibly delisted|No data found"; exit ${PIPESTATUS[0]}
+      # 本番Lambdaのレイヤーと同じyfinanceのバージョンにそろえる
+      - run: pip install "yfinance==1.5.2" pandas
+      - run: python ops_check/collect.py 2>&1 | grep -E "^(ROW|DONE|yfinance)"; exit ${PIPESTATUS[0]}
         shell: bash
