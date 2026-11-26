@@ -160,3 +160,17 @@ class TestScanUniverseUsesForwardPeg:
         self._setup(monkeypatch, boom)
         with pytest.raises(RuntimeError, match="予想成長率の取得成功率"):
             handler._scan_universe("MID", "NASDAQ100")
+
+
+def test_test_scan_hook_scans_without_sending(monkeypatch):
+    """診断フック: メールは送らず、スキャン結果の要約だけを返す"""
+    import json
+    calls = []
+    monkeypatch.setattr(handler, "_scan_universe", lambda mode, universe: calls.append((mode, universe)) or (
+        [{"ticker": "NVDA", "peg": 0.125, "earnings_growth": 0.72}], {"NVDA": {}, "AAPL": {}}))
+    monkeypatch.setattr(handler, "send_email", lambda *a, **k: (_ for _ in ()).throw(AssertionError("送信された")))
+    r = handler._dispatch({"_test_scan": {"mode": "MID", "universe": "SP500"}})
+    body = json.loads(r["body"])
+    assert calls == [("MID", "SP500")]
+    assert body["universe"] == "SP500" and body["scanned"] == 2
+    assert body["top"] == [{"ticker": "NVDA", "peg": 0.125, "growth": 0.72}]

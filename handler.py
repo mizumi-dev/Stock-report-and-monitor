@@ -9,6 +9,8 @@ approved_tokensのstatus="approved"の利用者全員に、各自のwatchlist・
 """
 import html
 import os
+import time
+import json
 import traceback
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -543,6 +545,25 @@ def _dispatch(event: dict) -> dict:
     # 障害通知の実地確認ができる(test-skip-reviewスキルでの検討結果を反映)。
     if event.get("_test_trigger_failure"):
         raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
+
+    # 全銘柄スキャンが最後まで通るかを、メールを送らずに確かめるための診断フック
+    # (2026-11-26、PEGの自前計算化でYahooへの問い合わせが増えたため追加)。
+    # 例: {"_test_scan": {"mode": "MID", "universe": "SP500"}}。
+    # 通常の定時実行と同じくスナップショット・予想キャッシュは保存されるが、送信はしない
+    if event.get("_test_scan") is not None:
+        opts = event["_test_scan"] if isinstance(event["_test_scan"], dict) else {}
+        mode, universe = opts.get("mode", DEFAULT_PERIOD_MODE), opts.get("universe", DEFAULT_UNIVERSE)
+        started = time.time()
+        ranked, signals_map = _scan_universe(mode, universe)
+        summary = {
+            "mode": mode, "universe": normalize_universe(universe),
+            "seconds": round(time.time() - started, 1),
+            "scanned": len(signals_map),
+            "top": [{"ticker": r["ticker"], "peg": round(float(r["peg"]), 3),
+                     "growth": round(float(r["earnings_growth"]), 3)} for r in ranked],
+        }
+        print(f"[TEST_SCAN] {json.dumps(summary, ensure_ascii=False)}")
+        return {"statusCode": 200, "body": json.dumps(summary, ensure_ascii=False)}
 
     owner_token = event.get("owner_token")
 
