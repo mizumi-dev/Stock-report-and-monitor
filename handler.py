@@ -42,7 +42,7 @@ from config import (
 from data_sources import apply_forward_peg, get_growth_estimate, get_nasdaq100_tickers, get_sp500_tickers, get_stock_data
 from mailer import ResendMailer
 from signals import calc_all_signals
-from ranking import rank_stocks
+from ranking import passes_pre_gate, rank_stocks
 from report import build_selection_report, build_selection_report_multi, build_monitoring_report, build_weekly_tweet_text, selection_subject
 from social import XPoster
 
@@ -131,8 +131,14 @@ def get_cached_tickers(universe: str = DEFAULT_UNIVERSE) -> list[str] | None:
         return None
 
 
+def _estimate_from_cache(v) -> dict | None:
+    if not isinstance(v, dict):
+        return None
+    return {k: (None if x is None else float(x)) for k, x in v.items()}
+
+
 def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
-    """来期の予想EPS成長率を {ticker: 成長率 or None} で返す。2つ目の戻り値は取得に
+    """今期・来期の予想EPS成長率を {ticker: {"current_year", "next_year"} or None} で返す。2つ目の戻り値は取得に
     失敗した(通信エラー等)銘柄数。
     アナリスト予想は判定期間モード・対象指数に依存しないので、app_settingsに当日分を
     1件だけキャッシュし、同じ日の全スキャン(全モード・全指数・監視レポート)で共有する。
@@ -144,7 +150,7 @@ def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
     try:
         item = table.get_item(Key={"key": GROWTH_CACHE_KEY}).get("Item") or {}
         if item.get("as_of_date") == today:
-            cached = {k: (None if v is None else float(v)) for k, v in dict(item.get("values") or {}).items()}
+            cached = {k: _estimate_from_cache(v) for k, v in dict(item.get("values") or {}).items()}
     except Exception as e:
         print(f"[WARN] 成長率キャッシュの取得に失敗: {e}")
 
@@ -177,14 +183,19 @@ def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
 
 
 def _fill_forward_peg(stocks: list[dict]) -> tuple[int, int]:
-    """stocksの各要素にPEG・来期の予想EPS成長率を埋める。予想PERが無い・0以下の銘柄は
-    どのみちPEGが計算できないので、アナリスト予想を問い合わせない(Yahooへの負荷を
-    減らすため)。戻り値は(問い合わせた銘柄数, 取得に失敗した銘柄数)。"""
-    targets = [s["ticker"] for s in stocks if (s.get("forward_pe") or 0) > 0]
-    growth, failed = get_growth_estimates(targets) if targets else ({}, 0)
+    """stocksの各要素に、来期の予想EPS成長率・PEG(基本情報の予想EPSから計算、追加の
+    問い合わせなし)と、今期の予想EPS成長率(一時的な落ち込みの判定用)を埋める。
+    今期の成長率は前期実績が必要でYahooの予想表への追加の問い合わせになるため、
+    それ以外の足切りを通った候補(全体の2割弱)にだけ問い合わせる(Yahooに止められない
+    よう、2026-11-26の実測を受けて)。戻り値は(問い合わせた銘柄数, 取得に失敗した銘柄数)。"""
     for s in stocks:
-        apply_forward_peg(s, growth.get(s["ticker"]))
+        apply_forward_peg(s)
         s["growth_basis"] = GROWTH_BASIS_FORWARD
+    targets = [s["ticker"] for s in stocks if passes_pre_gate(s)]
+    estimates, failed = get_growth_estimates(targets) if targets else ({}, 0)
+    for s in stocks:
+        est = estimates.get(s["ticker"]) or {}
+        s["current_year_growth"] = est.get("current_year")
     return len(targets), failed
 
 
@@ -665,9 +676,19 @@ def _dispatch(event: dict) -> dict:
     users = get_approved_users()
     selection_targets = [u for u in users if should_send_selection(
         get_user_period_mode(u["token"]), weekday, day_of_month, IS_WEEKLY_REPORT_DAY)]
+    # 選定レポート(全銘柄スキャン、Yahooに止められる可能性がある)で失敗しても、
+    # 監視レポート(利用者が選んだ数銘柄だけ)は届ける。失敗は最後に送出し直して、
+    # エラー通知・CloudWatchアラーム・自動再試行(送信済みの分は重複送信しない)に乗せる
+    selection_error = None
     if selection_targets:
-        run_selection_reports(selection_targets, dedupe=True)
+        try:
+            run_selection_reports(selection_targets, dedupe=True)
+        except Exception as e:
+            print(f"[ERROR] 選定レポートの処理に失敗、監視レポートは続行: {e}")
+            selection_error = e
     run_monitoring_reports(users, dedupe=True)
+    if selection_error is not None:
+        raise selection_error
     if weekday == IS_WEEKLY_REPORT_DAY:
         post_weekly_tweet()
     return {"statusCode": 200, "body": "OK"}
