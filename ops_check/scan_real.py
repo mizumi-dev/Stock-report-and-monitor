@@ -11,7 +11,7 @@ import yfinance as yf
 print("RESULT yfinance", yf.__version__, flush=True)
 fake = FakeDynamoDBResource({"app_settings": ("key", None)})
 handler.dynamodb = fake; handler.SETTINGS_TABLE = "app_settings"
-handler.TOP_N = 10
+handler.TOP_N = 10  # rerun
 calls = {"n": 0, "fail": 0}
 orig = handler.get_growth_estimate
 def counting(t):
