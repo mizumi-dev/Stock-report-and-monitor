@@ -139,3 +139,20 @@ def test_dispatch_scheduled_path_uses_dedupe(monkeypatch):
     monkeypatch.setattr(handler, "post_weekly_tweet", lambda: None)
     handler._dispatch({"simulate_date": "2026-11-25T11:00:00+00:00"})
     assert calls == {"sel": {"dedupe": True}, "mon": {"dedupe": True}}
+
+
+def test_monitoring_is_still_sent_when_selection_fails(monkeypatch):
+    """選定レポートのスキャンが失敗(Yahooに止められた等)しても監視レポートは送り、
+    失敗はその後に送出してエラー通知に乗せる"""
+    order = []
+    monkeypatch.setattr(handler, "get_approved_users", lambda: [{"token": "t", "email": "e"}])
+    monkeypatch.setattr(handler, "get_user_period_mode", lambda tok: "SHORT")
+    def failing_selection(users, **k):
+        order.append("selection")
+        raise RuntimeError("予想成長率の取得成功率が低すぎます")
+    monkeypatch.setattr(handler, "run_selection_reports", failing_selection)
+    monkeypatch.setattr(handler, "run_monitoring_reports", lambda users, **k: order.append("monitoring"))
+    monkeypatch.setattr(handler, "post_weekly_tweet", lambda: order.append("tweet"))
+    with pytest.raises(RuntimeError, match="予想成長率"):
+        handler._dispatch({"simulate_date": "2026-11-25T11:00:00+00:00"})
+    assert order == ["selection", "monitoring"]

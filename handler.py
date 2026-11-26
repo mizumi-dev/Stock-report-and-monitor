@@ -676,9 +676,19 @@ def _dispatch(event: dict) -> dict:
     users = get_approved_users()
     selection_targets = [u for u in users if should_send_selection(
         get_user_period_mode(u["token"]), weekday, day_of_month, IS_WEEKLY_REPORT_DAY)]
+    # 選定レポート(全銘柄スキャン、Yahooに止められる可能性がある)で失敗しても、
+    # 監視レポート(利用者が選んだ数銘柄だけ)は届ける。失敗は最後に送出し直して、
+    # エラー通知・CloudWatchアラーム・自動再試行(送信済みの分は重複送信しない)に乗せる
+    selection_error = None
     if selection_targets:
-        run_selection_reports(selection_targets, dedupe=True)
+        try:
+            run_selection_reports(selection_targets, dedupe=True)
+        except Exception as e:
+            print(f"[ERROR] 選定レポートの処理に失敗、監視レポートは続行: {e}")
+            selection_error = e
     run_monitoring_reports(users, dedupe=True)
+    if selection_error is not None:
+        raise selection_error
     if weekday == IS_WEEKLY_REPORT_DAY:
         post_weekly_tweet()
     return {"statusCode": 200, "body": "OK"}
