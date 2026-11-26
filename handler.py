@@ -42,7 +42,7 @@ from config import (
 from data_sources import apply_forward_peg, get_growth_estimate, get_nasdaq100_tickers, get_sp500_tickers, get_stock_data
 from mailer import ResendMailer
 from signals import calc_all_signals
-from ranking import rank_stocks
+from ranking import passes_pre_gate, rank_stocks
 from report import build_selection_report, build_selection_report_multi, build_monitoring_report, build_weekly_tweet_text, selection_subject
 from social import XPoster
 
@@ -183,14 +183,19 @@ def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
 
 
 def _fill_forward_peg(stocks: list[dict]) -> tuple[int, int]:
-    """stocksの各要素にPEG・来期の予想EPS成長率を埋める。予想PERが無い・0以下の銘柄は
-    どのみちPEGが計算できないので、アナリスト予想を問い合わせない(Yahooへの負荷を
-    減らすため)。戻り値は(問い合わせた銘柄数, 取得に失敗した銘柄数)。"""
-    targets = [s["ticker"] for s in stocks if (s.get("forward_pe") or 0) > 0]
-    growth, failed = get_growth_estimates(targets) if targets else ({}, 0)
+    """stocksの各要素に、来期の予想EPS成長率・PEG(基本情報の予想EPSから計算、追加の
+    問い合わせなし)と、今期の予想EPS成長率(一時的な落ち込みの判定用)を埋める。
+    今期の成長率は前期実績が必要でYahooの予想表への追加の問い合わせになるため、
+    それ以外の足切りを通った候補(全体の2割弱)にだけ問い合わせる(Yahooに止められない
+    よう、2026-11-26の実測を受けて)。戻り値は(問い合わせた銘柄数, 取得に失敗した銘柄数)。"""
     for s in stocks:
-        apply_forward_peg(s, growth.get(s["ticker"]))
+        apply_forward_peg(s)
         s["growth_basis"] = GROWTH_BASIS_FORWARD
+    targets = [s["ticker"] for s in stocks if passes_pre_gate(s)]
+    estimates, failed = get_growth_estimates(targets) if targets else ({}, 0)
+    for s in stocks:
+        est = estimates.get(s["ticker"]) or {}
+        s["current_year_growth"] = est.get("current_year")
     return len(targets), failed
 
 

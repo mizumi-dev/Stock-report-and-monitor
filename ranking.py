@@ -14,6 +14,16 @@ from config import DEFAULT_TOP_N, GROWTH_BASIS_FORWARD, MAX_PEG, MIN_CURRENT_YEA
 TOP_N = DEFAULT_TOP_N
 
 
+def passes_pre_gate(stock: dict) -> bool:
+    """今期の予想EPS成長率を見る前の足切り(来期成長率・PEG・実績黒字)。今期の成長率は
+    Yahooへの追加の問い合わせが必要なため、ここを通った候補にだけ問い合わせる"""
+    eg = stock.get("earnings_growth")
+    peg = stock.get("peg")
+    eps = stock.get("trailing_eps")
+    return (eg is not None and eg >= MIN_GROWTH and peg is not None and 0 < peg <= MAX_PEG
+            and eps is not None and eps > 0)
+
+
 def passes_gate(stock: dict) -> bool:
     eg = stock.get("earnings_growth")
     peg = stock.get("peg")

@@ -133,6 +133,10 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
             "history": hist,
             "forward_pe": info.get("forwardPE"),
             "trailing_eps": info.get("trailingEps"),
+            # 今期・来期の予想EPS(アナリストのコンセンサス)。来期の予想EPS成長率は
+            # この2つから計算でき、追加の問い合わせが要らない
+            "eps_current_year": info.get("epsCurrentYear"),
+            "eps_next_year": info.get("forwardEps") or info.get("epsForward"),
             "peg": None,
             "earnings_growth": None,
             "market_cap": info.get("marketCap"),
@@ -180,10 +184,21 @@ def forward_peg(forward_pe, growth) -> float | None:
     return forward_pe / (growth * 100)
 
 
-def apply_forward_peg(stock: dict, estimate: dict | None) -> dict:
-    """get_stock_dataの結果に、来期・今期の予想EPS成長率と、来期の成長率を使ったPEGを埋める"""
-    estimate = estimate or {}
-    stock["earnings_growth"] = estimate.get("next_year")
-    stock["current_year_growth"] = estimate.get("current_year")
+def next_year_growth(eps_current_year, eps_next_year) -> float | None:
+    """来期の予想EPS成長率 = 来期の予想EPS ÷ 今期の予想EPS − 1。今期の予想EPSが0以下
+    (赤字予想)だと成長率が意味を持たないためNone(足切りで外れる)。
+    Yahooの予想表(growth_estimatesの+1y)と同じ値になることを実データで確認済み
+    (NVDA +71.7%、TWLO +11.1%、2026-11-26)。"""
+    cur, nxt = _as_finite_float(eps_current_year), _as_finite_float(eps_next_year)
+    if cur is None or nxt is None or cur <= 0:
+        return None
+    return nxt / cur - 1
+
+
+def apply_forward_peg(stock: dict) -> dict:
+    """get_stock_dataの結果に、来期の予想EPS成長率とそれを使ったPEGを埋める。
+    今期の予想EPS成長率(一時的な落ち込みの判定用)は、足切りの候補にだけ別途埋める"""
+    stock["earnings_growth"] = next_year_growth(stock.get("eps_current_year"), stock.get("eps_next_year"))
     stock["peg"] = forward_peg(stock.get("forward_pe"), stock["earnings_growth"])
+    stock.setdefault("current_year_growth", None)
     return stock
