@@ -25,6 +25,7 @@ from datetime import datetime, timezone
 
 from config import (
     MAX_PEG,
+    MIN_CURRENT_YEAR_GROWTH,
     MIN_GROWTH,
     PERIOD_PRESETS,
     SETTINGS_TABLE_DEFAULT,
@@ -596,7 +597,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
           <summary>How stocks are picked, and important notes</summary>
           <p>We screen NASDAQ100 or S&amp;P 500 constituents (your choice, switchable anytime)
           for growth stocks with a low
-          <strong>PEG ratio</strong> (P/E ÷ earnings growth rate). For stocks you track,
+          <strong>PEG ratio</strong> (forward P/E ÷ expected EPS growth). For stocks you track,
           we monitor trend, momentum, and volume signals on a regular schedule.</p>
           <p class="muted">How often you hear from us depends on the time horizon you pick
           (short-term = every trading day, mid-term = weekly, long-term = monthly). You can
@@ -660,7 +661,7 @@ def _render_signup_form(lang: str = LANG_JA, notice: str = "") -> str:
     <details>
       <summary>くわしい選定方法・注意事項</summary>
       <p>NASDAQ100またはS&amp;P500構成銘柄（登録後にいつでも切り替え可能）の中から、
-      <strong>PEGレシオ</strong>（株価収益率÷利益成長率）が
+      <strong>PEGレシオ</strong>（予想PER÷予想EPS成長率）が
       低い成長株を選定します。登録した銘柄については、トレンド・モメンタム・
       出来高の3種類のシグナルを定期的に監視して通知します。</p>
       <p class="muted">※配信の頻度は選んだ判定期間モードによって変わります
@@ -1141,16 +1142,19 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
         <details open>
           <summary>📈 Selection report — auto-picks growth stocks ranked by PEG ratio</summary>
           <p>Universe: {universe_note}. Only stocks
-          meeting both conditions below become candidates, and the top ones are sent ranked by
+          meeting all conditions below become candidates, and the top ones are sent ranked by
           PEG ascending (ties broken by larger market cap first).</p>
           <ul>
-            <li>Earnings growth rate at or above {MIN_GROWTH * 100:.0f}%</li>
+            <li>Analysts' expected EPS growth for next fiscal year at or above {MIN_GROWTH * 100:.0f}%</li>
             <li>PEG ratio greater than 0 and at or below {MAX_PEG}</li>
+            <li>Not recovering from a one-off dip: this fiscal year's expected EPS growth is
+            {MIN_CURRENT_YEAR_GROWTH * 100:.0f}% or better, and trailing 12-month EPS is positive</li>
           </ul>
-          <p class="muted">PEG, earnings growth, market cap, and price all come from
-          <strong>Yahoo Finance (the yfinance library)</strong>. PEG is "P/E ratio ÷ earnings
-          growth rate" — a lower PEG means the price is lower relative to growth. We don't recalculate it
-          ourselves. Send frequency depends on the mode (short-term = every trading day,
+          <p class="muted">Forward P/E, expected EPS growth (analyst consensus), market cap, and
+          price all come from <strong>Yahoo Finance (the yfinance library)</strong>. We calculate
+          PEG ourselves as "forward P/E ÷ next fiscal year's expected EPS growth (%)" — a lower PEG
+          means the price is lower relative to expected growth. Stocks with no analyst estimate, or
+          with earnings expected to shrink, have no PEG and are excluded. Send frequency depends on the mode (short-term = every trading day,
           mid-term = every Monday, long-term = first Monday of the month).</p>
           <p class="muted">Delivery timing: before the US market opens (6:00am US Eastern Time),
           using data through the previous trading day. On Mondays, since no new trading data
@@ -1210,15 +1214,19 @@ def _render_info(token: str, lang: str = LANG_JA) -> str:
 
     <details open>
       <summary>📈 選定レポート — PEGレシオが低い成長株を自動選定</summary>
-      <p>対象: {universe_note}。次の条件を両方満たす
+      <p>対象: {universe_note}。次の条件をすべて満たす
       銘柄だけを候補にし、PEGの小さい順（同値なら時価総額の大きい順）に上位を送ります。</p>
       <ul>
-        <li>利益成長率が {MIN_GROWTH * 100:.0f}% 以上</li>
+        <li>来期の予想EPS成長率（アナリスト予想の平均）が {MIN_GROWTH * 100:.0f}% 以上</li>
         <li>PEGレシオが 0 より大きく {MAX_PEG} 以下</li>
+        <li>一時的な落ち込みからの反動でないこと（今期の予想EPS成長率が{MIN_CURRENT_YEAR_GROWTH * 100:.0f}%以上、
+        かつ過去12か月の実績EPSが黒字）</li>
       </ul>
-      <p class="muted">PEG・利益成長率・時価総額・株価は<strong>Yahoo Finance
-      （yfinanceライブラリ）</strong>から取得。PEGは「株価収益率(PER) ÷ 利益成長率」で、
-      低いほど株価が利益成長率に対して低い水準にあることを示す指標です。当サービスでの再計算はしていません。
+      <p class="muted">予想PER・予想EPS成長率（アナリスト予想の平均）・時価総額・株価は
+      <strong>Yahoo Finance（yfinanceライブラリ）</strong>から取得。PEGは当サービスで
+      「予想PER ÷ 来期の予想EPS成長率(%)」として計算しており、低いほど株価が予想成長率に
+      対して低い水準にあることを示します。アナリスト予想が無い銘柄や、減益が予想されている
+      銘柄はPEGが計算できないため対象外です。
       発行頻度はモードによって異なります（短期=毎営業日、中期=毎週月曜、長期=月初の月曜で月1回）。</p>
       <p class="muted">配信タイミング: 米国市場が開く前（米東部時間 朝6:00、日本時間では
       夏時間中は夜19:00頃・冬時間中は夜20:00頃）に、直前の取引日までのデータで配信します。
@@ -1393,8 +1401,9 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
         <p>A stock can have a high P/E ratio and still be reasonable <em>if</em> the company is
         growing fast. PEG captures exactly that: it divides the P/E ratio by how fast profits
         are growing. <strong>A lower PEG means the price is lower relative to that growth.
-        </strong> We only include stocks with a PEG between 0 and {MAX_PEG}, and earnings
-        growth of {MIN_GROWTH * 100:.0f}% or more.</p>
+        </strong> We use the forward P/E and analysts' expected EPS growth for next fiscal year,
+        so a one-off profit in a past quarter doesn't pull a stock's PEG down. We only include stocks
+        with a PEG between 0 and {MAX_PEG}, and expected EPS growth of {MIN_GROWTH * 100:.0f}% or more.</p>
 
         <h4>4. Reading the signal lamps</h4>
         {_svg_signals("Trend", "Momentum", "Volume", "Buy", "None", "Sell")}
@@ -1503,7 +1512,9 @@ def _render_guide(token: str, lang: str = LANG_JA) -> str:
     <p>株価収益率(PER)が高くても、その会社が急成長しているなら「妥当」かもしれません。
     PEGはまさにそれを測る指標で、<strong>PERを、利益の成長率で割った値</strong>です。
     <strong>PEGが小さいほど、成長率に対して株価の水準が低い</strong>ことを意味します。
-    本サービスでは、PEGが0〜{MAX_PEG}の範囲かつ利益成長率が{MIN_GROWTH * 100:.0f}%以上の
+    本サービスでは、<strong>予想PER</strong>と<strong>来期の予想EPS成長率</strong>（アナリスト
+    予想の平均）で計算しているので、過去の一時的な利益でPEGが低く出ることはありません。
+    PEGが0〜{MAX_PEG}の範囲かつ予想EPS成長率が{MIN_GROWTH * 100:.0f}%以上の
     銘柄だけを対象にしています。</p>
 
     <h4>4. シグナルのランプの見方</h4>

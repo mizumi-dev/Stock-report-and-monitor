@@ -10,6 +10,8 @@ approved_tokensのstatus="approved"の利用者全員に、各自のwatchlist・
 import html
 import math
 import os
+import time
+import json
 import traceback
 import boto3
 from boto3.dynamodb.conditions import Key
@@ -21,6 +23,9 @@ from config import (
     DEFAULT_PERIOD_MODE,
     DEFAULT_UNIVERSE,
     FETCH_MAX_WORKERS,
+    GROWTH_BASIS_FORWARD,
+    GROWTH_CACHE_KEY,
+    GROWTH_FETCH_MAX_WORKERS,
     MIN_FETCH_SUCCESS_RATIO,
     SETTINGS_TABLE_DEFAULT,
     TOKEN_STATUS_APPROVED,
@@ -34,10 +39,10 @@ from config import (
     user_period_mode_key,
     user_universe_key,
 )
-from data_sources import get_nasdaq100_tickers, get_sp500_tickers, get_stock_data
+from data_sources import apply_forward_peg, get_growth_estimate, get_nasdaq100_tickers, get_sp500_tickers, get_stock_data
 from mailer import ResendMailer
 from signals import calc_all_signals
-from ranking import rank_stocks
+from ranking import passes_pre_gate, rank_stocks
 from report import build_selection_report, build_selection_report_multi, build_monitoring_report, build_weekly_tweet_text, selection_subject
 from social import XPoster
 
@@ -126,6 +131,74 @@ def get_cached_tickers(universe: str = DEFAULT_UNIVERSE) -> list[str] | None:
         return None
 
 
+def _estimate_from_cache(v) -> dict | None:
+    if not isinstance(v, dict):
+        return None
+    return {k: (None if x is None else float(x)) for k, x in v.items()}
+
+
+def get_growth_estimates(tickers: list[str]) -> tuple[dict, int]:
+    """今期・来期の予想EPS成長率を {ticker: {"current_year", "next_year"} or None} で返す。2つ目の戻り値は取得に
+    失敗した(通信エラー等)銘柄数。
+    アナリスト予想は判定期間モード・対象指数に依存しないので、app_settingsに当日分を
+    1件だけキャッシュし、同じ日の全スキャン(全モード・全指数・監視レポート)で共有する。
+    「予想が無い」(None)はキャッシュするが、「取れなかった」はキャッシュしない
+    (同じ日の次のスキャンで取り直せるように)。"""
+    today = _today_str()
+    cached: dict = {}
+    table = dynamodb.Table(SETTINGS_TABLE)
+    try:
+        item = table.get_item(Key={"key": GROWTH_CACHE_KEY}).get("Item") or {}
+        if item.get("as_of_date") == today:
+            cached = {k: _estimate_from_cache(v) for k, v in dict(item.get("values") or {}).items()}
+    except Exception as e:
+        print(f"[WARN] 成長率キャッシュの取得に失敗: {e}")
+
+    missing = [t for t in dict.fromkeys(tickers) if t not in cached]
+    failed = 0
+    if missing:
+        def fetch(t):
+            try:
+                return t, get_growth_estimate(t), True
+            except Exception as e:
+                print(f"[WARN] {t}の予想成長率の取得に失敗: {e}")
+                return t, None, False
+        with ThreadPoolExecutor(max_workers=GROWTH_FETCH_MAX_WORKERS) as executor:
+            for t, g, ok in executor.map(fetch, missing):
+                if ok:
+                    cached[t] = g
+                else:
+                    failed += 1
+        try:
+            table.put_item(Item={
+                "key": GROWTH_CACHE_KEY,
+                "as_of_date": today,
+                "values": _to_dynamodb_safe(cached),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception as e:
+            print(f"[WARN] 成長率キャッシュの保存に失敗: {e}")
+
+    return {t: cached.get(t) for t in tickers}, failed
+
+
+def _fill_forward_peg(stocks: list[dict]) -> tuple[int, int]:
+    """stocksの各要素に、来期の予想EPS成長率・PEG(基本情報の予想EPSから計算、追加の
+    問い合わせなし)と、今期の予想EPS成長率(一時的な落ち込みの判定用)を埋める。
+    今期の成長率は前期実績が必要でYahooの予想表への追加の問い合わせになるため、
+    それ以外の足切りを通った候補(全体の2割弱)にだけ問い合わせる(Yahooに止められない
+    よう、2026-11-26の実測を受けて)。戻り値は(問い合わせた銘柄数, 取得に失敗した銘柄数)。"""
+    for s in stocks:
+        apply_forward_peg(s)
+        s["growth_basis"] = GROWTH_BASIS_FORWARD
+    targets = [s["ticker"] for s in stocks if passes_pre_gate(s)]
+    estimates, failed = get_growth_estimates(targets) if targets else ({}, 0)
+    for s in stocks:
+        est = estimates.get(s["ticker"]) or {}
+        s["current_year_growth"] = est.get("current_year")
+    return len(targets), failed
+
+
 def save_cached_tickers(universe: str, tickers: list[str]):
     try:
         table = dynamodb.Table(SETTINGS_TABLE)
@@ -210,7 +283,7 @@ def send_email(subject: str, html_body: str, to_address: str):
 # report.py が実際に使うフィールドのみ(ranked各要素にはdata_sources.get_stock_data由来の
 # "history"(pandas DataFrame、DynamoDBに保存できない)や current_price/prev_close/error等、
 # レポート表示に不要なフィールドも混ざっているため、保存前に削ぎ落とす)
-_SELECTION_CACHE_FIELDS = ("ticker", "company_name", "peg", "earnings_growth", "market_cap")
+_SELECTION_CACHE_FIELDS = ("ticker", "company_name", "peg", "earnings_growth", "market_cap", "growth_basis")
 
 
 def save_selection_snapshot(mode: str, ranked: list[dict], signals_map: dict,
@@ -285,6 +358,15 @@ def _scan_universe(mode: str, universe: str = DEFAULT_UNIVERSE) -> tuple[list, d
         raise RuntimeError(
             f"銘柄データの取得成功率が低すぎます({len(stocks)}/{len(tickers)}件、"
             f"閾値{MIN_FETCH_SUCCESS_RATIO:.0%}未満)。外部APIの障害の可能性があります。"
+        )
+
+    # アナリスト予想がまとめて取れない場合(Yahooにアクセスを止められた等)も、
+    # 「足切りを通る銘柄なし」という誤ったレポートを送らずエラー通知に切り替える
+    requested, failed = _fill_forward_peg(stocks)
+    if requested and (requested - failed) / requested < MIN_FETCH_SUCCESS_RATIO:
+        raise RuntimeError(
+            f"予想成長率の取得成功率が低すぎます({requested - failed}/{requested}件、"
+            f"閾値{MIN_FETCH_SUCCESS_RATIO:.0%}未満)。Yahooへのアクセスが制限されている可能性があります。"
         )
 
     ranked = rank_stocks(stocks, top_n=TOP_N)
@@ -400,11 +482,23 @@ def run_monitoring_reports(users: list[dict], dedupe: bool = False):
     snapshots: dict[tuple[str, str], dict | None] = {}
     for mode, tickers in tickers_by_mode.items():
         preset = get_preset(mode)
+        # 1銘柄の想定外のデータでバッチ全体(他の銘柄・他の利用者)を止めないよう、
+        # 銘柄単位で失敗を隔離する。取得・計算に失敗した銘柄は「データ不足」と同じ扱い
+        fetched = {}
         for t in tickers:
-            # 1銘柄の想定外のデータでバッチ全体(他の銘柄・他の利用者)を止めないよう、
-            # 銘柄単位で失敗を隔離する。計算に失敗した銘柄は「データ不足」と同じ扱い
             try:
-                d = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
+                fetched[t] = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
+            except Exception as e:
+                print(f"[WARN] {t}({mode})の監視データ取得に失敗、スキップ: {e}")
+                fetched[t] = {"ticker": t, "history": None}
+        # 監視レポートのPEG(参考表示)も選定レポートと同じ計算式にそろえる。
+        # 予想成長率は選定スキャンと同じ当日キャッシュを共有する
+        try:
+            _fill_forward_peg([d for d in fetched.values() if d.get("history") is not None])
+        except Exception as e:
+            print(f"[WARN] 監視銘柄のPEG計算に失敗(PEGなしで続行): {e}")
+        for t, d in fetched.items():
+            try:
                 if d.get("history") is None:
                     snapshots[(mode, t)] = None
                     continue
@@ -478,6 +572,7 @@ def send_monitoring_report_now(user: dict):
             if d.get("history") is None:
                 skipped.append(t)
                 continue
+            _fill_forward_peg([d])
             sig = calc_all_signals(d["history"], mode)
             snapshot = {
                 "signals": sig,
@@ -527,6 +622,25 @@ def _dispatch(event: dict) -> dict:
     if event.get("_test_trigger_failure"):
         raise RuntimeError("これはTODO#7bのテスト用に意図的に発生させた例外です。実際の障害ではありません。")
 
+    # 全銘柄スキャンが最後まで通るかを、メールを送らずに確かめるための診断フック
+    # (2026-11-26、PEGの自前計算化でYahooへの問い合わせが増えたため追加)。
+    # 例: {"_test_scan": {"mode": "MID", "universe": "SP500"}}。
+    # 通常の定時実行と同じくスナップショット・予想キャッシュは保存されるが、送信はしない
+    if event.get("_test_scan") is not None:
+        opts = event["_test_scan"] if isinstance(event["_test_scan"], dict) else {}
+        mode, universe = opts.get("mode", DEFAULT_PERIOD_MODE), opts.get("universe", DEFAULT_UNIVERSE)
+        started = time.time()
+        ranked, signals_map = _scan_universe(mode, universe)
+        summary = {
+            "mode": mode, "universe": normalize_universe(universe),
+            "seconds": round(time.time() - started, 1),
+            "scanned": len(signals_map),
+            "top": [{"ticker": r["ticker"], "peg": round(float(r["peg"]), 3),
+                     "growth": round(float(r["earnings_growth"]), 3)} for r in ranked],
+        }
+        print(f"[TEST_SCAN] {json.dumps(summary, ensure_ascii=False)}")
+        return {"statusCode": 200, "body": json.dumps(summary, ensure_ascii=False)}
+
     owner_token = event.get("owner_token")
 
     # 画面の「監視レポートを送る」ボタンから来た場合は、押した本人の分だけ、保存済み
@@ -562,9 +676,19 @@ def _dispatch(event: dict) -> dict:
     users = get_approved_users()
     selection_targets = [u for u in users if should_send_selection(
         get_user_period_mode(u["token"]), weekday, day_of_month, IS_WEEKLY_REPORT_DAY)]
+    # 選定レポート(全銘柄スキャン、Yahooに止められる可能性がある)で失敗しても、
+    # 監視レポート(利用者が選んだ数銘柄だけ)は届ける。失敗は最後に送出し直して、
+    # エラー通知・CloudWatchアラーム・自動再試行(送信済みの分は重複送信しない)に乗せる
+    selection_error = None
     if selection_targets:
-        run_selection_reports(selection_targets, dedupe=True)
+        try:
+            run_selection_reports(selection_targets, dedupe=True)
+        except Exception as e:
+            print(f"[ERROR] 選定レポートの処理に失敗、監視レポートは続行: {e}")
+            selection_error = e
     run_monitoring_reports(users, dedupe=True)
+    if selection_error is not None:
+        raise selection_error
     if weekday == IS_WEEKLY_REPORT_DAY:
         post_weekly_tweet()
     return {"statusCode": 200, "body": "OK"}
