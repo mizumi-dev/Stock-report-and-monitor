@@ -5,6 +5,7 @@
 - yfinanceで個別銘柄データを取得
 """
 import json
+from datetime import datetime, timezone
 import math
 import re
 import urllib.request
@@ -93,6 +94,22 @@ def get_sp500_tickers(fallback: list[str] | None = None) -> list[str]:
         raise
 
 
+# 銘柄の基本情報(tk.info)は判定期間モードに依存しないため、同じ日の中では1回だけ
+# 問い合わせて使い回す(モードごとのスキャン・監視レポートで同じ銘柄を何度も問い合わせ、
+# Yahooへの負荷が積み上がるのを防ぐ、2026-11-26)。株価履歴は期間がモードごとに
+# 違うので毎回取得する。Lambdaの再利用コンテナでも日付が変われば取り直す
+_INFO_CACHE: dict[tuple[str, str], dict] = {}
+
+
+def _get_info(tk, ticker: str) -> dict:
+    key = (ticker, datetime.now(timezone.utc).strftime("%Y-%m-%d"))
+    if key not in _INFO_CACHE:
+        if len(_INFO_CACHE) > 5000:
+            _INFO_CACHE.clear()
+        _INFO_CACHE[key] = tk.info
+    return _INFO_CACHE[key]
+
+
 def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
     """
     1銘柄分の価格ヒストリー・PEG・成長率・時価総額を取得する。
@@ -108,7 +125,7 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
         if hist.empty or len(hist) < min_rows:
             return {"ticker": ticker, "history": None, "error": "insufficient_history"}
 
-        info = tk.info
+        info = _get_info(tk, ticker)
         # PEG・成長率はここでは確定させない(YahooのpegRatioは異常値があるため使わない)。
         # 呼び出し側で来期の予想EPS成長率を取得し、apply_forward_pegで埋める
         return {

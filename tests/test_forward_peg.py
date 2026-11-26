@@ -209,3 +209,25 @@ class TestDipExclusion:
     def test_rules_do_not_apply_to_old_yahoo_peg_rows(self):
         """growth_basisの無い旧方式の行(テスト・過去データ)には適用しない"""
         assert passes_gate({"earnings_growth": 0.5, "peg": 1.0}) is True
+
+
+
+def test_stock_info_is_fetched_once_per_day_across_modes(monkeypatch):
+    """基本情報はモードをまたいで1日1回だけ問い合わせる(Yahooの負荷対策)"""
+    data_sources._INFO_CACHE.clear()
+    info_calls = []
+    class FakeTicker:
+        def __init__(self, t):
+            self.t = t
+        def history(self, period):
+            return pd.DataFrame({"Close": [1.0] * 300})
+        @property
+        def info(self):
+            info_calls.append(self.t)
+            return {"forwardPE": 10.0, "trailingEps": 2.0, "shortName": self.t}
+    monkeypatch.setattr(data_sources.yf, "Ticker", FakeTicker)
+    a = data_sources.get_stock_data("AAA", period="6mo", min_rows=60)
+    b = data_sources.get_stock_data("AAA", period="2y", min_rows=201)
+    assert info_calls == ["AAA"]
+    assert a["forward_pe"] == b["forward_pe"] == 10.0
+    data_sources._INFO_CACHE.clear()
