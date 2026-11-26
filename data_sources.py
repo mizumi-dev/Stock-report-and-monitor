@@ -108,11 +108,14 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
             return {"ticker": ticker, "history": None, "error": "insufficient_history"}
 
         info = tk.info
+        # PEG・成長率はここでは確定させない(YahooのpegRatioは異常値があるため使わない)。
+        # 呼び出し側で来期の予想EPS成長率を取得し、apply_forward_pegで埋める
         return {
             "ticker": ticker,
             "history": hist,
-            "peg": info.get("pegRatio"),
-            "earnings_growth": info.get("earningsGrowth"),
+            "forward_pe": info.get("forwardPE"),
+            "peg": None,
+            "earnings_growth": None,
             "market_cap": info.get("marketCap"),
             "current_price": info.get("currentPrice") or hist["Close"].iloc[-1],
             "prev_close": info.get("previousClose") or hist["Close"].iloc[-2],
@@ -121,3 +124,39 @@ def get_stock_data(ticker: str, period: str = "1y", min_rows: int = 60) -> dict:
         }
     except Exception as e:
         return {"ticker": ticker, "history": None, "error": str(e)}
+
+
+def get_growth_estimate(ticker: str) -> float | None:
+    """来期(+1y)の予想EPS成長率(アナリストのコンセンサス、0.2=+20%)を返す。
+    予想が無い銘柄はNone。通信エラー等の取得失敗は例外を送出する(呼び出し側で
+    「予想が無い」と「取れなかった」を区別し、取れなかった分はキャッシュしないため)。"""
+    ge = yf.Ticker(ticker).growth_estimates
+    if ge is None or getattr(ge, "empty", True) or "+1y" not in ge.index or "stockTrend" not in ge.columns:
+        return None
+    value = ge.loc["+1y", "stockTrend"]
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if value != value else value  # NaN → None
+
+
+def forward_peg(forward_pe, growth) -> float | None:
+    """PEG = 予想PER ÷ 来期の予想EPS成長率(%)。どちらかが無い・0以下ならNone
+    (赤字予想や減益予想の銘柄はPEGが意味を持たないため)。"""
+    if forward_pe is None or growth is None:
+        return None
+    try:
+        forward_pe, growth = float(forward_pe), float(growth)
+    except (TypeError, ValueError):
+        return None
+    if forward_pe <= 0 or growth <= 0:
+        return None
+    return forward_pe / (growth * 100)
+
+
+def apply_forward_peg(stock: dict, growth: float | None) -> dict:
+    """get_stock_dataの結果に、来期の予想EPS成長率とそれを使ったPEGを埋める"""
+    stock["earnings_growth"] = growth
+    stock["peg"] = forward_peg(stock.get("forward_pe"), growth)
+    return stock

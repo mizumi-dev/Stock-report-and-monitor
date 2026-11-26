@@ -490,3 +490,18 @@ def test_multi_universe_selection_report_is_english_when_lang_is_en():
     body = build_selection_report_multi(sections, "https://pegsignal.com/", "tok123", "MID", lang="en")
     assert "Universe: NASDAQ100" in body and "Universe: S&amp;P 500" in body
     assert "対象指数" not in body
+
+
+def test_selection_card_labels_growth_by_basis():
+    """2026-11-26のPEG方式変更: 新方式のスナップショットは「来期予想EPS成長率」、
+    growth_basisの無い旧スナップショットは従来どおり「利益成長率」と表示する"""
+    from report import render_selection_cards
+    base = {"ticker": "NVDA", "company_name": "NVIDIA", "peg": 0.13, "earnings_growth": 0.72, "market_cap": 1}
+    new = render_selection_cards([{**base, "growth_basis": "forward_1y"}], {"NVDA": {}},
+                                 "https://pegsignal.com/", "ja", "tok")
+    old = render_selection_cards([base], {"NVDA": {}}, "https://pegsignal.com/", "ja", "tok")
+    assert "来期予想EPS成長率: +72.0%" in new
+    assert "利益成長率: +72.0%" in old and "来期予想" not in old
+    en = render_selection_cards([{**base, "growth_basis": "forward_1y"}], {"NVDA": {}},
+                                "https://pegsignal.com/", "en", "tok")
+    assert "Expected EPS growth (next yr): +72.0%" in en
