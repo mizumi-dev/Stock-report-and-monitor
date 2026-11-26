@@ -66,8 +66,8 @@ def test_post_weekly_tweet_swallows_post_failure(monkeypatch):
 def test_dispatch_posts_weekly_tweet_on_report_day(monkeypatch):
     monkeypatch.setattr(handler, "IS_WEEKLY_REPORT_DAY", "0")
     monkeypatch.setattr(handler, "get_approved_users", lambda: [])
-    monkeypatch.setattr(handler, "run_selection_reports", lambda targets: None)
-    monkeypatch.setattr(handler, "run_monitoring_reports", lambda users: None)
+    monkeypatch.setattr(handler, "run_selection_reports", lambda targets, **k: None)
+    monkeypatch.setattr(handler, "run_monitoring_reports", lambda users, **k: None)
 
     called = []
     monkeypatch.setattr(handler, "post_weekly_tweet", lambda: called.append(True))
@@ -80,8 +80,8 @@ def test_dispatch_posts_weekly_tweet_on_report_day(monkeypatch):
 def test_dispatch_skips_weekly_tweet_on_non_report_day(monkeypatch):
     monkeypatch.setattr(handler, "IS_WEEKLY_REPORT_DAY", "0")
     monkeypatch.setattr(handler, "get_approved_users", lambda: [])
-    monkeypatch.setattr(handler, "run_selection_reports", lambda targets: None)
-    monkeypatch.setattr(handler, "run_monitoring_reports", lambda users: None)
+    monkeypatch.setattr(handler, "run_selection_reports", lambda targets, **k: None)
+    monkeypatch.setattr(handler, "run_monitoring_reports", lambda users, **k: None)
 
     called = []
     monkeypatch.setattr(handler, "post_weekly_tweet", lambda: called.append(True))

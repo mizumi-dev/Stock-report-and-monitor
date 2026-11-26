@@ -8,6 +8,7 @@ approved_tokensのstatus="approved"の利用者全員に、各自のwatchlist・
 「使われているモードごと」に1回だけスキャンし、そのモードの利用者全員に配る。
 """
 import html
+import math
 import os
 import time
 import json
@@ -228,8 +229,13 @@ def get_latest_signal_snapshot(ticker: str, mode: str) -> dict | None:
 
 
 def _to_dynamodb_safe(value):
-    """DynamoDBはPythonのfloatを受け付けないためDecimalに変換する"""
+    """DynamoDBはPythonのfloatを受け付けないためDecimalに変換する。
+    NaN・無限大はDynamoDBが受け付けず(TypeError: Infinity and NaN not supported)、
+    1銘柄の値が欠けただけでバッチ全体が止まっていたため、None(値なし)として保存する
+    (2026-11-25の本番障害: 監視レポートの保存で落ち、自動再試行で選定レポートが3通届いた)。"""
     if isinstance(value, float):
+        if not math.isfinite(value):
+            return None
         return Decimal(str(value))
     if isinstance(value, dict):
         return {k: _to_dynamodb_safe(v) for k, v in value.items()}
@@ -357,12 +363,43 @@ def _scan_universe(mode: str, universe: str = DEFAULT_UNIVERSE) -> tuple[list, d
     return ranked, signals_map
 
 
-def run_selection_reports(users: list[dict]):
+def _sent_key(owner_token: str, kind: str) -> str:
+    return f"{owner_token}#last_sent#{kind}"
+
+
+def _already_sent_today(owner_token: str, kind: str) -> bool:
+    """定時実行の自動再試行で同じレポートを二重に送らないための確認。
+    確認自体に失敗した場合は「未送信」とみなす(送れないよりは重複の方がまし)。"""
+    try:
+        item = dynamodb.Table(SETTINGS_TABLE).get_item(Key={"key": _sent_key(owner_token, kind)}).get("Item")
+        return bool(item) and item.get("value") == _today_str()
+    except Exception as e:
+        print(f"[WARN] 送信済み記録の確認に失敗: {e}")
+        return False
+
+
+def _mark_sent_today(owner_token: str, kind: str):
+    try:
+        dynamodb.Table(SETTINGS_TABLE).put_item(Item={
+            "key": _sent_key(owner_token, kind),
+            "value": _today_str(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as e:
+        print(f"[WARN] 送信済み記録の保存に失敗: {e}")
+
+
+def run_selection_reports(users: list[dict], dedupe: bool = False):
     """usersに含まれる利用者全員へ選定レポートを送る(定時実行用)。(モード,ユニバース)の
     組み合わせごとに1回だけスキャンし、そのスキャン結果がそのままその日のスナップショットになる。
     対象指数を複数選んでいる利用者には、指数ごとのランキングを1通にまとめて送る
     (2026-11-25)。スキャンは(モード,ユニバース)単位で使い回すので、両方選んだ利用者が
-    いても同じ組み合わせを二重にスキャンすることはない。"""
+    いても同じ組み合わせを二重にスキャンすることはない。
+    dedupe=True(定時実行)のときは、同じ日にすでに送った利用者には送らない。Lambdaは
+    エラー終了すると自動で2回再実行するため、後続処理で落ちると同じメールが最大3通
+    届いていた(2026-11-25の本番障害)。"""
+    if dedupe:
+        users = [u for u in users if not _already_sent_today(u["token"], "selection")]
     by_key: dict[tuple[str, tuple[str, ...]], list[dict]] = {}
     for u in users:
         mode = get_user_period_mode(u["token"])
@@ -381,6 +418,8 @@ def run_selection_reports(users: list[dict]):
                 u["token"], mode, lang)
             subject = selection_subject(mode, lang)
             send_email(subject, body, u["email"])
+            if dedupe:
+                _mark_sent_today(u["token"], "selection")
 
 
 def _selection_body(results: list[tuple], token: str, mode: str, lang: str) -> str:
@@ -417,7 +456,7 @@ def send_selection_report_now(user: dict):
     send_email(subject, body, user["email"])
 
 
-def run_monitoring_reports(users: list[dict]):
+def run_monitoring_reports(users: list[dict], dedupe: bool = False):
     """usersに含まれる利用者全員へ、それぞれの監視リストに基づくレポートを送る
     (定時実行用)。watchlistが空の利用者はスキップする。利用者ごとの監視銘柄を
     モードごとに集約し、複数人が同じ銘柄を登録していても取得・計算は1回だけにする。"""
@@ -432,29 +471,50 @@ def run_monitoring_reports(users: list[dict]):
     snapshots: dict[tuple[str, str], dict | None] = {}
     for mode, tickers in tickers_by_mode.items():
         preset = get_preset(mode)
-        fetched = {t: get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
-                   for t in tickers}
+        # 1銘柄の想定外のデータでバッチ全体(他の銘柄・他の利用者)を止めないよう、
+        # 銘柄単位で失敗を隔離する。取得・計算に失敗した銘柄は「データ不足」と同じ扱い
+        fetched = {}
+        for t in tickers:
+            try:
+                fetched[t] = get_stock_data(t, period=preset["history_period"], min_rows=preset["min_rows"])
+            except Exception as e:
+                print(f"[WARN] {t}({mode})の監視データ取得に失敗、スキップ: {e}")
+                fetched[t] = {"ticker": t, "history": None}
         # 監視レポートのPEG(参考表示)も選定レポートと同じ計算式にそろえる。
         # 予想成長率は選定スキャンと同じ当日キャッシュを共有する
-        _fill_forward_peg([d for d in fetched.values() if d.get("history") is not None])
+        try:
+            _fill_forward_peg([d for d in fetched.values() if d.get("history") is not None])
+        except Exception as e:
+            print(f"[WARN] 監視銘柄のPEG計算に失敗(PEGなしで続行): {e}")
         for t, d in fetched.items():
-            if d.get("history") is None:
+            try:
+                if d.get("history") is None:
+                    snapshots[(mode, t)] = None
+                    continue
+                sig = calc_all_signals(d["history"], mode)
+                entry = {
+                    "signals": sig,
+                    "price": d["current_price"],
+                    "prev_close": d["prev_close"],
+                    "peg": d.get("peg"),
+                    "prev_signals": get_prev_signals(t, mode),
+                }
+            except Exception as e:
+                print(f"[WARN] {t}({mode})の監視データ計算に失敗、スキップ: {e}")
                 snapshots[(mode, t)] = None
                 continue
-            sig = calc_all_signals(d["history"], mode)
-            entry = {
-                "signals": sig,
-                "price": d["current_price"],
-                "prev_close": d["prev_close"],
-                "peg": d.get("peg"),
-                "prev_signals": get_prev_signals(t, mode),
-            }
-            save_signal_snapshot(t, mode, entry)
+            try:
+                save_signal_snapshot(t, mode, entry)
+            except Exception as e:
+                # 保存できなくても、本日のレポートには載せる
+                print(f"[WARN] {t}({mode})の監視データ保存に失敗: {e}")
             snapshots[(mode, t)] = entry
 
     for u in users:
         watchlist = watchlists[u["token"]]
         if not watchlist:
+            continue
+        if dedupe and _already_sent_today(u["token"], "monitoring"):
             continue
         mode = modes[u["token"]]
         results, skipped = [], []
@@ -479,6 +539,8 @@ def run_monitoring_reports(users: list[dict]):
                                        lang=lang, as_of=_today_str())
         subject = "📊 Today's monitoring report" if lang == "en" else "📊 本日の監視レポート"
         send_email(subject, body, u["email"])
+        if dedupe:
+            _mark_sent_today(u["token"], "monitoring")
 
 
 def send_monitoring_report_now(user: dict):
@@ -509,7 +571,10 @@ def send_monitoring_report_now(user: dict):
                 "prev_signals": get_prev_signals(t, mode),
                 "as_of_date": _today_str(),
             }
-            save_signal_snapshot(t, mode, snapshot)
+            try:
+                save_signal_snapshot(t, mode, snapshot)
+            except Exception as e:
+                print(f"[WARN] {t}({mode})の監視データ保存に失敗: {e}")
 
         results.append({
             "ticker": t,
@@ -601,8 +666,8 @@ def _dispatch(event: dict) -> dict:
     selection_targets = [u for u in users if should_send_selection(
         get_user_period_mode(u["token"]), weekday, day_of_month, IS_WEEKLY_REPORT_DAY)]
     if selection_targets:
-        run_selection_reports(selection_targets)
-    run_monitoring_reports(users)
+        run_selection_reports(selection_targets, dedupe=True)
+    run_monitoring_reports(users, dedupe=True)
     if weekday == IS_WEEKLY_REPORT_DAY:
         post_weekly_tweet()
     return {"statusCode": 200, "body": "OK"}
