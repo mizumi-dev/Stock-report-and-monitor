@@ -247,7 +247,7 @@ def test_dispatch_monitoring_only_without_owner_token_falls_back_to_bulk_run(mon
     monkeypatch.setattr(handler, "get_approved_users", lambda: users)
 
     received = []
-    monkeypatch.setattr(handler, "run_monitoring_reports", lambda targets: received.extend(targets))
+    monkeypatch.setattr(handler, "run_monitoring_reports", lambda targets, **k: received.extend(targets))
 
     handler.handler({"monitoring_only": True}, None)
 
