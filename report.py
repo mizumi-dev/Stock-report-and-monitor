@@ -10,7 +10,7 @@ lang="ja"(既定)なら従来通り日本語、lang="en"なら英語版を生成
 """
 import html
 
-from config import PERIOD_PRESETS, get_universe_preset
+from config import GROWTH_BASIS_FORWARD, PERIOD_PRESETS, get_universe_preset
 
 LANG_JA = "ja"
 LANG_EN = "en"
@@ -64,7 +64,7 @@ T = {
         LANG_JA: (
             "「トレンド」はゴールデンクロス/デッドクロス(移動平均線の交差)、"
             "「モメンタム」はRSI(買われすぎ・売られすぎ)、「出来高」は平常時との比較です。"
-            "この選定は<strong>PEG(株価収益率÷利益成長率)を基準にランキング</strong>したもので、"
+            "この選定は<strong>PEG(予想PER÷来期の予想EPS成長率)を基準にランキング</strong>したもので、"
             "シグナルは現在の値動きの状態を補足する参考情報です。"
             "トレンドが既に下向き(デッドクロス)の銘柄は、PEGが低くても値動きが弱い可能性があるため"
             "注意してください。"
@@ -73,7 +73,7 @@ T = {
             "\"Trend\" is a golden/dead cross (moving average crossover), "
             "\"Momentum\" is RSI (overbought/oversold), and \"Volume\" compares against the normal "
             "baseline. This selection is <strong>ranked by PEG ratio</strong> "
-            "(P/E ratio ÷ earnings growth rate) — the signals are just "
+            "(forward P/E ÷ next year's expected EPS growth) — the signals are just "
             "supplementary information about current price action. "
             "A stock with an already-declining trend (dead cross) may be weak even with a low "
             "PEG, so please keep that in mind."
@@ -330,12 +330,17 @@ def render_selection_cards(ranked: list[dict], signals_map: dict, register_base_
     cards = []
     for i, s in enumerate(ranked, 1):
         sig = signals_map.get(s["ticker"], {})
+        # 旧方式(直近四半期の前年同期比)で保存されたスナップショットには
+        # growth_basisが無いため、表示ラベルを出し分ける(2026-11-26の方式変更)
+        forward = s.get("growth_basis") == GROWTH_BASIS_FORWARD
         if lang == LANG_EN:
             title = f"#{i} {s['ticker']} — {s.get('company_name','')}"
-            growth = f"PEG: {s['peg']:.2f} | Earnings growth: +{s['earnings_growth']*100:.1f}%"
+            growth_label = "Expected EPS growth (next yr)" if forward else "Earnings growth"
+            growth = f"PEG: {float(s['peg']):.2f} | {growth_label}: +{float(s['earnings_growth'])*100:.1f}%"
         else:
             title = f"【第{i}位】{s['ticker']} — {s.get('company_name','')}"
-            growth = f"PEG: {s['peg']:.2f} ｜ 利益成長率: +{s['earnings_growth']*100:.1f}%"
+            growth_label = "来期予想EPS成長率" if forward else "利益成長率"
+            growth = f"PEG: {float(s['peg']):.2f} ｜ {growth_label}: +{float(s['earnings_growth'])*100:.1f}%"
         watchlist_link = (
             f'<p style="margin:4px 0;"><a href="{register_form_url}&amp;ticker={s["ticker"]}">'
             f'{t("add_to_watchlist", lang)}</a></p>'

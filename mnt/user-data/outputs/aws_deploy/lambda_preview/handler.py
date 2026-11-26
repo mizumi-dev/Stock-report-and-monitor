@@ -223,7 +223,7 @@ def _intro_html(lang: str, universe: str, register_url: str) -> str:
         return f"""
         <p class="eyebrow">PegSignal (free, indie-built)</p>
         <h1>PEG screening results ({html.escape(label)})</h1>
-        <p>We rank {html.escape(label)} growth stocks by PEG ratio (P/E ratio ÷ earnings growth rate)
+        <p>We rank {html.escape(label)} growth stocks by PEG ratio (forward P/E ÷ expected EPS growth)
         across three time horizons — short-term, mid-term, and long-term. Jump to one of
         the three below, or just scroll through all of them.</p>
         <p class="trust-line">👀 No signup needed to read this page ・ 🔒 If you do sign up,
@@ -234,7 +234,7 @@ def _intro_html(lang: str, universe: str, register_url: str) -> str:
     return f"""
     <p class="eyebrow">PegSignal（無料・個人開発）</p>
     <h1>PEGスクリーニング結果（{html.escape(label)}）</h1>
-    <p>{html.escape(label)}構成銘柄の中から、PEGレシオ（株価収益率÷利益成長率）が低い成長株を、
+    <p>{html.escape(label)}構成銘柄の中から、PEGレシオ（予想PER÷予想EPS成長率）が低い成長株を、
     短期・中期・長期の3つの期間でランキングしています。
     下のリンクで見たい期間へ移動するか、そのまま3つとも順にご覧ください。</p>
     <p class="trust-line">👀 このページは登録不要でそのまま読めます ・

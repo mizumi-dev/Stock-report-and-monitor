@@ -53,8 +53,8 @@ Claude Codeを使って、投資情報を「受動的に」受け取れるサー
 ### 🛠 主な機能
 
 1. 米国株 低PEG成長株ランキング（登録不要）
-NASDAQ100・S&P500の構成銘柄から、利益成長率が一定水準以上かつPEGレシオ
-（株価収益率÷利益成長率）が低い銘柄をランキング表示します。
+NASDAQ100・S&P500の構成銘柄から、予想EPS成長率が一定水準以上かつPEGレシオ
+（予想PER÷予想EPS成長率）が低い銘柄をランキング表示します。
 
 2. テクニカルシグナル判定（登録不要）
 ランキング上位の各銘柄について、トレンド・モメンタム・出来高のシグナル
@@ -180,7 +180,7 @@ building a watchlist themselves. It's meant to be passive: you open
 the page, it's already ranked, you read it and leave.
 
 It screens NASDAQ100 (or S&P 500) constituents for growth stocks with
-a low PEG ratio (P/E ÷ earnings growth rate) and ranks them across
+a low PEG ratio (forward P/E ÷ expected EPS growth) and ranks them across
 three time horizons (short, mid, long term) — no signup needed to
 read it:
 https://pegsignal.com/?lang=en&src=hn
