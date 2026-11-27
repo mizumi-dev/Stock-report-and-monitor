@@ -9,6 +9,7 @@ lang="ja"(既定)なら従来通り日本語、lang="en"なら英語版を生成
 出し分け(見出し・ラベル・凡例等)はすべて下のT辞書 + t()に集約している。
 """
 import html
+import math
 
 from config import GROWTH_BASIS_FORWARD, PERIOD_PRESETS, get_universe_preset
 
@@ -80,6 +81,17 @@ T = {
         ),
     },
 }
+
+
+def _fmt_num(value, digits: int) -> str:
+    """表示用に数値を丸める。値なし・NaN・無限大は「―」にする(RSIを計算できない
+    上場間もない銘柄で「RSI nan」と出ていた、2026-11-27)。保存済みスナップショットの
+    Decimalや文字列もそのまま受け付ける。"""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "―"
+    return f"{v:.{digits}f}" if math.isfinite(v) else "―"
 
 
 def t(key: str, lang: str) -> str:
@@ -195,7 +207,7 @@ def _trend_text(detail: dict | None, lang: str) -> str:
 
 
 def _momentum_text(sig: dict, lang: str) -> str:
-    rsi = sig.get("rsi", "―")
+    rsi = _fmt_num(sig.get("rsi"), 1)
     if sig.get("sell_momentum"):
         return f"🔴 買われすぎ(RSI {rsi})" if lang == LANG_JA else f"🔴 Overbought (RSI {rsi})"
     if sig.get("buy_momentum"):
@@ -478,7 +490,8 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
         if sig.get("sell_trend"):
             warn_items.append(t("warn_dead_cross", lang))
         if sig.get("sell_momentum"):
-            rsi_warn = f"RSI overbought ({sig.get('rsi')})" if lang == LANG_EN else f"RSI買われすぎ({sig.get('rsi')})"
+            rsi_txt = _fmt_num(sig.get("rsi"), 1)
+            rsi_warn = f"RSI overbought ({rsi_txt})" if lang == LANG_EN else f"RSI買われすぎ({rsi_txt})"
             warn_items.append(rsi_warn)
         sep = ", " if lang == LANG_EN else "・"
         warn_text = sep.join(warn_items) if warn_items else t("no_warnings", lang)
@@ -509,7 +522,7 @@ def build_monitoring_report(watchlist_results: list[dict], mode: str = "",
           </table>
           <p style="margin:4px 0;">{volume_line}</p>
           <p style="margin:4px 0;">{warn_line}</p>
-          <p style="margin:4px 0;">{t('peg_reference', lang)}: {r.get('peg','―')}</p>
+          <p style="margin:4px 0;">{t('peg_reference', lang)}: {_fmt_num(r.get('peg'), 2)}</p>
           {_broker_links(r['ticker'], lang)}
           {_ai_prompt_link(register_base_url, r['ticker'], lang) if register_base_url else ''}
         </div>
