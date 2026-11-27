@@ -505,3 +505,32 @@ def test_selection_card_labels_growth_by_basis():
     en = render_selection_cards([{**base, "growth_basis": "forward_1y"}], {"NVDA": {}},
                                 "https://pegsignal.com/", "en", "tok")
     assert "Expected EPS growth (next yr): +72.0%" in en
+
+
+
+def test_rsi_nan_is_shown_as_dash_not_nan():
+    """RSIを計算できない銘柄(上場間もない等)で「RSI nan」と出ていた(2026-11-27)"""
+    from report import render_selection_cards
+    base = {"ticker": "SNDK", "company_name": "Sandisk", "peg": 0.08, "earnings_growth": 0.26,
+            "market_cap": 1, "growth_basis": "forward_1y"}
+    body = render_selection_cards([base], {"SNDK": {"rsi": float("nan")}}, "https://pegsignal.com/", "ja", "tok")
+    assert "RSI nan" not in body and "RSI ―" in body
+    body = render_selection_cards([base], {"SNDK": {"rsi": None}}, "https://pegsignal.com/", "ja", "tok")
+    assert "RSI None" not in body and "RSI ―" in body
+
+
+def test_monitoring_peg_is_rounded_to_two_decimals():
+    """新しいPEG計算で監視レポートのPEGが「1.0583834342992504」と全桁出ていた(2026-11-27)"""
+    from report import build_monitoring_report
+    from decimal import Decimal
+    results = [
+        {"ticker": "GOOGL", "price": 273.1, "prev_close": 279.0, "signals": {}, "prev_signals": None,
+         "peg": 1.0583834342992504},
+        {"ticker": "MU", "price": 700.0, "prev_close": 690.0, "signals": {}, "prev_signals": None,
+         "peg": Decimal("0.1712")},
+        {"ticker": "NEW", "price": 10.0, "prev_close": 10.0, "signals": {}, "prev_signals": None, "peg": None},
+    ]
+    body = build_monitoring_report(results, "SHORT")
+    assert "PEG(参考): 1.06" in body and "1.0583834342992504" not in body
+    assert "PEG(参考): 0.17" in body
+    assert "PEG(参考): ―" in body and "PEG(参考): None" not in body
